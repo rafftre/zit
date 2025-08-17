@@ -55,6 +55,10 @@ zit cat-file -p 4b4f223d5c2b7c88abd487b3eaf5de2000755cc3
   zit cat-file (-e | -p) <object>
   zit cat-file (-t | -s) [--allow-unknown-type] <object>
   ```
+- `inflate` - Decompresses an object in the repository. Usage:
+  ```
+  zit inflate <object>
+  ```
 
 
 ## Library Usage
@@ -70,17 +74,20 @@ See [lib.zig](./src/lib.zig) for more details.
   The repository will be created on the file-system
   in the directory `options.name` (or in the current directory when not specified)
   and with an in initial branch named `options.initial_branch` (or `main` when not specified).
-- `hashObject(allocator, store, reader, type_str, check_format, persist)`
+- `hashObject(allocator, object_store, reader, type_str, check_format, persist)`
   Computes the object's identifier name and - if `persist` is `true` - writes it to the object store.
   `type_str` is the type of the object, returns an error if it is not a valid type.
   When `check_format` is `true`, it checks that the content passes the standard object parsing.
   If `persist` is `true` writes to the object store.
-- `readObject(allocator, store, name, expected_type)`
+- `readObject(allocator, object_store, name, expected_type)`
   Reads the object content identified by `name` in the object store.
   When `expected_type` is specified, the type read must match it, otherwise an error will be returned.
-- `readTypeAndSize(allocator, store, name, allow_unknown_type)`
+- `readTypeAndSize(allocator, object_store, name, allow_unknown_type)`
   Reads the type and the size of the object identified by `name` in the object store.
   If `allow_unknown_type` is `true`, no error will be raised for an unknown type.
+- `readEncodedData(allocator, object_store, name)`
+  Reads the encoded content - i.e. header (type name, space, and length) and
+  serialized data - of the object identified by `name` in the object store.
 
 
 ## Development

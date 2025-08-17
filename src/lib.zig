@@ -156,6 +156,20 @@ pub fn readTypeAndSize(
     }
 }
 
+/// Reads the encoded content - i.e. header (type name, space, and length) and
+/// serialized data - of the object identified by `name` in the object store.
+/// Caller owns the returned memory.
+pub fn readEncodedData(
+    allocator: Allocator,
+    /// An object store instance.
+    object_store: anytype,
+    /// The name used to identify the object.
+    name: []const u8,
+) ![]u8 {
+    try validateObjectName(name);
+    return object_store.read(allocator, name);
+}
+
 inline fn validateObjectName(hex_string: []const u8) !void {
     _ = try ObjectId.parseHexString(hex_string);
 }

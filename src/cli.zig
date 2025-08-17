@@ -11,6 +11,7 @@ const Repository = zit.core.Repository;
 const help = @import("help.zig").command;
 const cat_file = @import("cat-file.zig").command;
 const hash_object = @import("hash-object.zig").command;
+const inflate = @import("inflate.zig").command;
 const init_repo = @import("init.zig").command;
 const version = @import("version.zig").command;
 
@@ -29,6 +30,7 @@ pub const commands = [_]Command{
     help,
     cat_file,
     hash_object,
+    inflate,
     init_repo,
     version,
 };
