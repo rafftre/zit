@@ -198,6 +198,13 @@ which corresponds to a dedicated code module.
 The `zlib` library is used directly within the storage module and is not a separate level itself.
 
 
+## Contributing
+
+Contributions are always welcome!
+For more details, please see
+[CONTRIBUTING.md](./CONTRIBUTING.md).
+
+
 ## License
 
 This project is licensed under the terms of the
