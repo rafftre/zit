@@ -34,8 +34,7 @@ Example:
 cd path/to/parent/dir
 zit init dirname
 cd dirname
-echo 'sample content' > test.txt
-zit hash-object -w test.txt
+echo 'sample content' | zit hash-object --stdin -w
 zit cat-file -p 4b4f223d5c2b7c88abd487b3eaf5de2000755cc3
 ```
 
@@ -153,7 +152,7 @@ From [git at v1.0.13](https://github.com/git/git/blob/v1.0.13/README):
 > It's worth noting that the SHA1 hash that is used to name the object is the hash of the original data plus this header,
 > so `sha1sum` 'file' does not match the object name for 'file'.
 
-### Object Handling
+### Loose Object Handling
 Data representation of objects is transformed sequentially through several stages.
 The operations for creation and access go through the same stages, but in reverse order.
 These transformations may be visualized as pipelines.
