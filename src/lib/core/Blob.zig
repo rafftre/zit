@@ -19,8 +19,8 @@ pub fn init(props: anytype) Blob {
 }
 
 /// Frees referenced resources.
-pub fn deinit(blob: *const Blob, allocator: Allocator) void {
-    allocator.free(blob.content);
+pub fn deinit(self: *const Blob, allocator: Allocator) void {
+    allocator.free(self.content);
 }
 
 /// Allocates a new blob.
