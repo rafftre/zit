@@ -114,7 +114,8 @@ test "reset" {
     hasher.final(&first_result);
 
     hasher.reset();
-    hasher.update("second data");
+    hasher.update("second");
+    hasher.update(" data");
     hasher.final(&second_result);
     try std.testing.expect(!first_result.eql(&second_result));
 
