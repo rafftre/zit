@@ -3,7 +3,7 @@
 
 //! A repository implementation that uses the file-system with the Git rules.
 
-const GitRepository = @This();
+const FileRepository = @This();
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -16,7 +16,7 @@ const ObjectStore = @import("../ObjectStore.zig");
 const Repository = @import("../Repository.zig");
 
 /// Returns an instance of the repository interface.
-pub fn interface(self: *GitRepository, objects: ObjectStore) Repository {
+pub fn interface(self: *FileRepository, objects: ObjectStore) Repository {
     return .{
         .ptr = self,
         .objects = objects,
@@ -30,19 +30,19 @@ git_dir_path: []u8,
 
 /// Creates a repository.
 /// Use `destroy` to free up used resources.
-pub fn create(allocator: Allocator, dir_name: ?[]const u8) !*GitRepository {
+pub fn create(allocator: Allocator, dir_name: ?[]const u8) !*FileRepository {
     const git_dir_path = try env.get(allocator, env.GIT_DIR) orelse try searchGitDirPath(allocator, dir_name);
     errdefer allocator.free(git_dir_path);
 
     std.log.debug("Using Git dir {s}", .{git_dir_path});
-    const res = try allocator.create(GitRepository);
+    const res = try allocator.create(FileRepository);
     res.git_dir_path = git_dir_path;
     return res;
 }
 
 /// Frees up used resources.
 pub fn destroy(ptr: *anyopaque, allocator: Allocator) void {
-    const self: *GitRepository = @ptrCast(@alignCast(ptr));
+    const self: *FileRepository = @ptrCast(@alignCast(ptr));
     allocator.free(self.git_dir_path);
     //allocator.free(self);
     //self.* = undefined;
@@ -52,7 +52,7 @@ pub fn destroy(ptr: *anyopaque, allocator: Allocator) void {
 /// Opens an existing repository.
 /// Use `destroy` to free up used resources.
 pub fn open(ptr: *anyopaque) !void {
-    const self: *GitRepository = @ptrCast(@alignCast(ptr));
+    const self: *FileRepository = @ptrCast(@alignCast(ptr));
 
     // opens the directory to assert that exists
     var git_dir = try cwd().openDir(self.git_dir_path, .{});
@@ -61,7 +61,7 @@ pub fn open(ptr: *anyopaque) !void {
 
 /// Returns the path of the repository.
 pub fn name(ptr: *anyopaque) ?[]const u8 {
-    const self: *GitRepository = @ptrCast(@alignCast(ptr));
+    const self: *FileRepository = @ptrCast(@alignCast(ptr));
     return self.git_dir_path;
 }
 
@@ -77,7 +77,7 @@ pub const SetupOptions = struct {
 
 /// Creates the directory tree and initializes a repository.
 /// Use `destroy` to free up used resources.
-pub fn setup(allocator: Allocator, options: SetupOptions) !*GitRepository {
+pub fn setup(allocator: Allocator, options: SetupOptions) !*FileRepository {
     if (options.name) |n| {
         try cwd().makePath(n);
     }
@@ -100,7 +100,7 @@ pub fn setup(allocator: Allocator, options: SetupOptions) !*GitRepository {
     const git_dir_path = try dest_dir.realpathAlloc(allocator, ".");
 
     std.log.debug("Using Git dir {s}", .{git_dir_path});
-    const res = try allocator.create(GitRepository);
+    const res = try allocator.create(FileRepository);
     res.git_dir_path = git_dir_path;
     return res;
 }

@@ -3,7 +3,7 @@
 
 //! An object store implementation that uses the file-system with the Git rules.
 
-const GitObjectStore = @This();
+const FileObjectStore = @This();
 
 const std = @import("std");
 const zlib = std.compress.zlib;
@@ -18,7 +18,7 @@ const env = @import("env.zig");
 const ObjectStore = @import("../ObjectStore.zig");
 
 /// Returns an instance of the object store interface.
-pub fn interface(self: *GitObjectStore) ObjectStore {
+pub fn interface(self: *FileObjectStore) ObjectStore {
     return .{
         .ptr = self,
         .openFn = open,
@@ -32,20 +32,20 @@ objects_dir_path: []u8,
 
 /// Creates an object store.
 /// Use `destroy` to free up used resources.
-pub fn create(allocator: Allocator, git_dir_path: []u8) !*GitObjectStore {
+pub fn create(allocator: Allocator, git_dir_path: []u8) !*FileObjectStore {
     const objects_dir_path = try env.get(allocator, env.GIT_OBJECT_DIR) orelse
         try std.fs.path.join(allocator, &.{ git_dir_path, default_object_dir });
     errdefer allocator.free(objects_dir_path);
 
     std.log.debug("Using objects dir {s}", .{objects_dir_path});
-    const res = try allocator.create(GitObjectStore);
+    const res = try allocator.create(FileObjectStore);
     res.objects_dir_path = objects_dir_path;
     return res;
 }
 
 /// Frees up used resources.
 pub fn destroy(ptr: *anyopaque, allocator: Allocator) void {
-    const self: *GitObjectStore = @ptrCast(@alignCast(ptr));
+    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
     allocator.free(self.objects_dir_path);
     allocator.destroy(self);
 }
@@ -53,7 +53,7 @@ pub fn destroy(ptr: *anyopaque, allocator: Allocator) void {
 /// Opens an existing store.
 /// Use `destroy` to free up used resources.
 pub fn open(ptr: *anyopaque) !void {
-    const self: *GitObjectStore = @ptrCast(@alignCast(ptr));
+    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
 
     // opens the directory to assert that exists
     var objects_dir = try cwd().openDir(self.objects_dir_path, .{});
@@ -63,7 +63,7 @@ pub fn open(ptr: *anyopaque) !void {
 /// Returns the raw content of an object in the store.
 /// Caller owns the returned memory.
 pub fn read(ptr: *anyopaque, allocator: Allocator, name: []const u8) ![]u8 {
-    const self: *GitObjectStore = @ptrCast(@alignCast(ptr));
+    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
 
     var paths = .{ self.objects_dir_path, name[0..2], name[2..] };
 
@@ -82,7 +82,7 @@ pub fn read(ptr: *anyopaque, allocator: Allocator, name: []const u8) ![]u8 {
 
 /// Write the raw content of an object to the store.
 pub fn write(ptr: *anyopaque, allocator: Allocator, name: []const u8, bytes: []u8) !void {
-    const self: *GitObjectStore = @ptrCast(@alignCast(ptr));
+    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
 
     var paths = .{ self.objects_dir_path, name[0..2] };
 
@@ -112,7 +112,7 @@ pub fn write(ptr: *anyopaque, allocator: Allocator, name: []const u8, bytes: []u
 
 /// Creates the directory tree and initializes an object store.
 /// Use `destroy` to free up used resources.
-pub fn setup(allocator: Allocator, git_dir_path: []u8) !*GitObjectStore {
+pub fn setup(allocator: Allocator, git_dir_path: []u8) !*FileObjectStore {
     const self = try create(allocator, git_dir_path);
 
     var objects_dir = try cwd().makeOpenPath(self.objects_dir_path, .{});

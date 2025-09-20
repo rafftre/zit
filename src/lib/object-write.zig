@@ -13,7 +13,7 @@ const ObjectType = model.ObjectType;
 const LooseObject = @import("LooseObject.zig");
 const Sha1 = hash.Sha1; // XXX: locked to SHA-1
 
-const max_file_size: usize = 1024 * 1024 * 1024; // XXX: dup of GitObjectStore.max_file_size...
+const max_file_size: usize = 1024 * 1024 * 1024; // XXX: dup of FileObjectStore.max_file_size...
 
 /// Computes the object's identifier name and optionally writes to the object store.
 /// `type_str` is the type of the object, returns an error if it is not a valid type.
