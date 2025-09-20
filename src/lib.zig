@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
 // SPDX-License-Identifier: MPL-2.0
 
-//! TODO package description
+//! This package is the entry-point for the library.
 
 pub const hash = @import("lib/helpers.zig").hash;
 

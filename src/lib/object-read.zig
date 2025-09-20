@@ -11,7 +11,7 @@ const Object = model.Object;
 const ObjectId = model.ObjectId;
 const ObjectType = model.ObjectType;
 const LooseObject = @import("LooseObject.zig");
-const Sha1 = @import("helpers.zig").hash.Sha1; // XXX: locked to SHA-1
+const Sha1 = @import("helpers.zig").hash.Sha1;
 
 /// Reads the object content identified by `name` in the object store.
 /// When `expected_type` is specified, the type read must match it, otherwise an error will be returned.

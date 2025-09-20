@@ -112,14 +112,17 @@ Open a browser at [localhost:5000](http://localhost:5000/) to read the generated
 ## Design Notes
 
 ### Architecture
-The code is structured into nested layers, with the outer levels depending on the inner, more abstract ones.
-
-The outermost layer consists of CLI commands and library access interface.
-
-The library has the following parts:
-1. `lib.zig` - the library interface.
-2. `lib` - Git logic and rules.
-3. `lib/core` - Git core objects.
+The code is structured into layers, with the higher levels depending on the lower ones.
+Each level corresponds to a Zig package with the following structure (from highest to lowest).
+- Entry-points:
+  - `cli` — CLI commands.
+  - `lib.zig` — library access interface.
+- Adapters and infrastructure:
+  - `lib/index` — Handling of the Git index file format.
+  - `lib/storage` — Management of repositories and object databases.
+- `lib` — Git logic and rules.
+- `lib/model` — Git core objects, commonly data structures.
+- `lib/helpers` — Helpers and common code used throughout the application.
 
 ### Limitations
 - Object names must be used in full length, i.e. 40 characters hash are needed to identify objects.
@@ -130,7 +133,9 @@ The library has the following parts:
   As an example, the `hashObject` function reads and allocates in memory the entire input
   without any particular performance considerations.
 - The maximum file size is arbitrarily limited to 1 GB,
-  (see `max_file_size` constant in [GitObjectStore](./src/lib/GitObjectStore.zig).
+  (see `max_file_size` constant in [storage](./src/lib/storage.zig).
+- SHA-1 hashing is hardcoded in some components (ObjectId, object-read, object-write),
+  ref: [hash-function-transition](https://git-scm.com/docs/hash-function-transition).
 
 
 ## Git Concepts
@@ -207,8 +212,7 @@ The `zlib` library is used directly within the storage module and is not a separ
 ## Contributing
 
 Contributions are always welcome!
-For more details, please see
-[CONTRIBUTING.md](./CONTRIBUTING.md).
+For more details, please see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 
 ## License

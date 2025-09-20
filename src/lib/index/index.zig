@@ -67,7 +67,7 @@ pub fn Index(comptime Hasher: type) type {
 
         inline fn deinitEntries(entries: std.ArrayList(Entry)) void {
             for (entries.items) |*entry| {
-                entry.deinit(entries.allocator); // XXX: use this approach for objects?
+                entry.deinit(entries.allocator);
             }
             entries.deinit();
         }

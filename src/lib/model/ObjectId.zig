@@ -9,7 +9,7 @@ const ObjectId = @This();
 const std = @import("std");
 
 const hash = @import("../helpers.zig").hash;
-const hash_size = hash.Sha1.hash_size; // XXX: locked to SHA-1
+const hash_size = hash.Sha1.hash_size;
 
 bytes: [hash_size]u8 = [_]u8{0} ** hash_size,
 

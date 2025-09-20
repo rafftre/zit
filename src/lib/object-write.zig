@@ -11,7 +11,7 @@ const model = @import("model.zig");
 const Object = model.Object;
 const ObjectType = model.ObjectType;
 const LooseObject = @import("LooseObject.zig");
-const Sha1 = hash.Sha1; // XXX: locked to SHA-1
+const Sha1 = hash.Sha1;
 
 const max_file_size = @import("storage.zig").max_file_size;
 
