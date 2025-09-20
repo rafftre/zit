@@ -9,11 +9,11 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.fs.cwd;
 
-const default_git_dir = ".git";
-
 const env = @import("env.zig");
 const ObjectStore = @import("../ObjectStore.zig");
 const Repository = @import("../Repository.zig");
+
+const default_git_dir = ".git";
 
 /// Returns an instance of the repository interface.
 pub fn interface(self: *FileRepository, objects: ObjectStore) Repository {

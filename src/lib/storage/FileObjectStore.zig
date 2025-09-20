@@ -11,11 +11,11 @@ const Allocator = std.mem.Allocator;
 const Dir = std.fs.Dir;
 const cwd = std.fs.cwd;
 
-pub const max_file_size: usize = 1024 * 1024 * 1024;
-const default_object_dir = "objects";
-
 const env = @import("env.zig");
 const ObjectStore = @import("../ObjectStore.zig");
+
+const max_file_size = @import("../storage.zig").max_file_size;
+const default_object_dir = "objects";
 
 /// Returns an instance of the object store interface.
 pub fn interface(self: *FileObjectStore) ObjectStore {

@@ -12,6 +12,9 @@ const Repository = @import("Repository.zig");
 pub const FileObjectStore = @import("storage/FileObjectStore.zig");
 pub const FileRepository = @import("storage/FileRepository.zig");
 
+pub const max_file_size: usize = 1024 * 1024 * 1024;
+pub const small_file_size: usize = 32 * 1024;
+
 /// Opens an existing Git repository.
 /// Search the repository on the file-system starting from `start_dir_name`,
 /// or from the current directory if not specified.
