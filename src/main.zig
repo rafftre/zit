@@ -6,7 +6,7 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
-const cli = @import("cli.zig");
+const cli = @import("cli/root.zig");
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 

@@ -65,10 +65,10 @@ zit cat-file -p 4b4f223d5c2b7c88abd487b3eaf5de2000755cc3
 The implementation of the CLI commands may be used as reference for usage of API functions.
 
 ### APIs
-See [lib.zig](./src/lib.zig) for more details.
-- `openRepository(allocator, name)`
+The entry point is [lib.zig](./src/lib.zig).
+- `storage.openGitRepository(allocator, name)`
   Opens a repository existing on the file-system, searching it from the directory `name`.
-- `createRepository(allocator, options)`
+- `storage.createGitRepository(allocator, options)`
   Creates an empty repository or reinitializes an existing one.
   The repository will be created on the file-system
   in the directory `options.name` (or in the current directory when not specified)
@@ -98,7 +98,7 @@ There are no dependencies.
 ### Building
 Execute:
 - `zig build -Doptimize=ReleaseSafe` to build a release
-- `zig build test` to run tests
+- `zig build test --summary all` to run tests
 
 ### Generating the documentation
 To generate and serve the HTML documentation for the library module run:
@@ -197,7 +197,7 @@ which corresponds to a dedicated code module.
  <-----| deserialize |<----| decode |<-+--| inflate |<----| read  |<----
        +-------------+     +--------+  :  +---------+     +-------+
       '---------------'   '----------' : '-------------------------'
-           Object          RawObject   :            Store
+           Object         LooseObject  :            Store
                                      Hasher
 ```
 
