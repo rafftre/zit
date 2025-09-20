@@ -3,7 +3,7 @@
 
 .{
     .name = .zit,
-    .version = "0.2.0",
+    .version = "0.3.0",
     .fingerprint = 0x4570515fd4addc18,
     .minimum_zig_version = "0.14.0",
 
