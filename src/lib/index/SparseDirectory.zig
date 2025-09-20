@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 
 //! Indicates that the index contains sparse directory entries
 //! (pointing to a tree instead of the list of file paths).

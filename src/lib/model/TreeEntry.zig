@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 
 //! A tree entry.
 //! It's composed by a file mode, a file name, and an object ID.

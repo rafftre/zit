@@ -1,6 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
-SPDX-License-Identifier: LGPL-3.0-or-later
+SPDX-License-Identifier: MPL-2.0
 -->
 
 # Contributing to Zit
@@ -62,4 +62,4 @@ Provide a clear explanation of the proposed feature and why it would be useful.
 
 By contributing to this project,
 you agree that your contributions will be licensed under the same license that covers the project:
-the [LGPL-3.0-or-later](./LICENSE) license.
+the [MPL-2.0](./LICENSE) license.

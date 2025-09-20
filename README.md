@@ -1,6 +1,6 @@
 <!--
 SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
-SPDX-License-Identifier: LGPL-3.0-or-later
+SPDX-License-Identifier: MPL-2.0
 -->
 
 # Zit, a Git implementation written in Zig
@@ -213,6 +213,4 @@ For more details, please see
 
 ## License
 
-This project is licensed under the terms of the
-[LGPL-3.0-or-later](./LICENSE)
-license.
+This project is licensed under the terms of the [MPL-2.0](./LICENSE) license.

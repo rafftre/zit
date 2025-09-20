@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
-// SPDX-License-Identifier: LGPL-3.0-or-later
+// SPDX-License-Identifier: MPL-2.0
 
 //! Package for the storage of repositories and object databases.
 //! Provides utility functions for opening a repository or creating a new one.
