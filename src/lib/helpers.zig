@@ -3,6 +3,7 @@
 
 //! Package for helper, common, or utility functions.
 
+pub const file = @import("helpers/file.zig");
 pub const hash = @import("helpers/hash.zig");
 
 test {

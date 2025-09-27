@@ -3,6 +3,7 @@
 
 //! This package is the entry-point for the library.
 
+pub const file = @import("lib/helpers.zig").file;
 pub const hash = @import("lib/helpers.zig").hash;
 
 pub const model = @import("lib/model.zig");
