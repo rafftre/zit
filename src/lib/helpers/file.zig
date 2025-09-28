@@ -360,7 +360,6 @@ test "permissions from integer" {
     for (test_cases) |c| {
         const bits, const expected = c;
         const perm = Permissions.of(bits);
-        //std.debug.print("{} -> {}\n", .{ bits, perm });
 
         try std.testing.expect(Permissions.eql(&perm, &expected));
     }
@@ -448,6 +447,154 @@ test "format permissions" {
             "{any}",
             "rwxrwxrwx",
         },
+    };
+
+    inline for (test_cases) |c| {
+        const val, const fmt, const expected = c;
+
+        buf.clearRetainingCapacity();
+        try std.fmt.format(buf.writer(), fmt, .{val});
+        try std.testing.expectEqualSlices(u8, expected, buf.items);
+    }
+}
+
+/// File mode.
+/// It's a u16 integer composed by a sequence of:
+/// - 4 bits file type,
+/// - 3 null bits (0),
+/// - 9 bits Unix permissions.
+pub const Mode = packed struct(u16) {
+    // Note: field order is the reverse of the bit layout
+    permissions: Permissions = .{},
+    nil: AccessRights = .{},
+    type: Type = .indeterminate,
+
+    /// Returns the mode for the given value.
+    pub fn of(bits: u16) Mode {
+        return @bitCast(bits);
+    }
+
+    /// Returns `true` if the modes are equal.
+    pub inline fn eql(a: *const Mode, b: *const Mode) bool {
+        const a_bits: u16 = @bitCast(a.*);
+        const b_bits: u16 = @bitCast(b.*);
+        return a_bits == b_bits;
+    }
+
+    /// Returns the mode for the given string (representing an octal number).
+    pub fn parse(s: []const u8) !Mode {
+        var type_str: []const u8 = undefined;
+        var perm_str: []const u8 = undefined;
+
+        if (s.len == 5) {
+            type_str = s[0..1];
+            perm_str = s[2..5];
+        } else if (s.len == 6) {
+            type_str = s[0..2];
+            perm_str = s[3..6];
+        } else {
+            return error.InvalidFormat;
+        }
+
+        const perm_num = try std.fmt.parseInt(u9, perm_str, 8);
+
+        return .{
+            .type = try Type.parse(type_str),
+            .permissions = Permissions.of(perm_num),
+        };
+    }
+
+    /// Formatting method for use with `std.fmt.format`.
+    /// Format and options are ignored.
+    pub fn format(
+        self: Mode,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try writer.print("{o}{o}{o}", .{ self.type, self.nil, self.permissions });
+    }
+};
+
+test "mode from integer" {
+    const test_cases = [_]struct { u16, Mode }{
+        .{ 0, Mode{} },
+        .{ 0o160764, Mode{
+            .type = .gitlink,
+            .permissions = Permissions{
+                .user = .{ .read = true, .write = true, .execute = true },
+                .group = .{ .read = true, .write = true },
+                .others = .{ .read = true },
+            },
+        } },
+    };
+
+    for (test_cases) |c| {
+        const bits, const expected = c;
+        const mode = Mode.of(bits);
+
+        try std.testing.expect(Mode.eql(&mode, &expected));
+    }
+}
+
+test "parse mode string" {
+    const test_cases = [_]struct { []const u8, Mode }{
+        .{ "000000", Mode{} },
+        .{ "40540", Mode{
+            .type = .directory,
+            .permissions = Permissions{
+                .user = .{ .read = true, .execute = true },
+                .group = .{ .read = true },
+                .others = .{},
+            },
+        } },
+        .{ "160764", Mode{
+            .type = .gitlink,
+            .permissions = Permissions{
+                .user = .{ .read = true, .write = true, .execute = true },
+                .group = .{ .read = true, .write = true },
+                .others = .{ .read = true },
+            },
+        } },
+    };
+
+    for (test_cases) |c| {
+        const s, const expected = c;
+        const mode = try Mode.parse(s);
+
+        try std.testing.expect(Mode.eql(&mode, &expected));
+    }
+
+    // errors
+    try std.testing.expectError(error.InvalidFormat, Mode.parse(""));
+    try std.testing.expectError(error.InvalidFormat, Mode.parse("0"));
+    try std.testing.expectError(error.InvalidFormat, Mode.parse("0160764"));
+}
+
+test "format mode" {
+    const allocator = std.testing.allocator;
+
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+
+    const test_cases = [_]struct { Mode, []const u8, []const u8 }{
+        .{ Mode{}, "{any}", "000000" },
+        .{ Mode{
+            .type = .directory,
+            .permissions = Permissions{
+                .user = .{ .read = true, .execute = true },
+                .group = .{ .read = true },
+                .others = .{},
+            },
+        }, "{any}", "040540" },
+        .{ Mode{
+            .type = .gitlink,
+            .permissions = Permissions{
+                .user = .{ .read = true, .write = true, .execute = true },
+                .group = .{ .read = true, .write = true },
+                .others = .{ .read = true },
+            },
+        }, "{any}", "160764" },
     };
 
     inline for (test_cases) |c| {

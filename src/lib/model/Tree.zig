@@ -127,7 +127,7 @@ test "serialize and deserialize" {
         .object_id = obj_id1,
     });
     try tree.addEntry(.{
-        .mode = .tree,
+        .mode_type = .tree,
         .name = @constCast("subdir"),
         .object_id = obj_id2,
     });
@@ -140,12 +140,12 @@ test "serialize and deserialize" {
 
     const first_item = deserialized.entries.items[0];
     try std.testing.expect(deserialized.entries.items.len == 2);
-    try std.testing.expect(first_item.mode == .blob);
+    try std.testing.expect(first_item.mode_type == .blob);
     try std.testing.expectEqualStrings(first_item.name, "file1.txt");
     try std.testing.expect(first_item.object_id.eql(&obj_id1));
 
     const second_item = deserialized.entries.items[1];
-    try std.testing.expect(second_item.mode == .tree);
+    try std.testing.expect(second_item.mode_type == .tree);
     try std.testing.expect(std.mem.eql(u8, second_item.name, "subdir"));
     try std.testing.expect(second_item.object_id.eql(&obj_id2));
 }
@@ -179,12 +179,12 @@ test "format" {
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });
     try tree.addEntry(.{
-        .mode = .executable,
+        .mode_type = .executable,
         .name = @constCast("foo"),
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });
     try tree.addEntry(.{
-        .mode = .tree,
+        .mode_type = .tree,
         .name = @constCast("lib"),
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });

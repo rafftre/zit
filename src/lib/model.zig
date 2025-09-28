@@ -4,6 +4,7 @@
 //! Package for core object models.
 
 pub const Identity = @import("model/Identity.zig");
+pub const ModeType = @import("model/file_mode.zig").Type;
 pub const Signature = @import("model/Signature.zig");
 pub const Time = @import("model/Time.zig");
 

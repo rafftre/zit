@@ -10,60 +10,13 @@ const Entry = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const file = @import("../helpers/file.zig");
 const ObjectId = @import("ObjectId.zig");
+const ModeType = @import("file_mode.zig").Type;
 
-const mode_len = 6;
+const mode_len = std.fmt.comptimePrint("{o}", .{file.Mode{}}).len;
 
-/// File modes for tree entries.
-pub const Mode = enum(u32) {
-    tree = 0o40000,
-    blob = 0o100644,
-    executable = 0o100755,
-    symlink = 0o120000,
-    submodule = 0o160000,
-    // 0o100664 is a deprecated mode supported by the first versions of Git.
-    // This mode can still be found in old packfiles and should be treated as a regular file.
-
-    /// Returns the mode for the given string (representing an octal number).
-    pub fn parse(octal: []const u8) !Mode {
-        const n = try std.fmt.parseInt(u32, octal, 8);
-        if (n == 0o100664) {
-            return .blob;
-        }
-        return try std.meta.intToEnum(Mode, n);
-    }
-
-    /// Formatting method for use with `std.fmt.format`.
-    ///
-    /// The supported formats are:
-    /// - 'o' for octal string
-    /// - Any other value will result in a descriptive string ("blob", "tree", or "submodule").
-    ///
-    /// Options are ignored.
-    pub fn format(
-        self: Mode,
-        comptime fmt: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        if (std.mem.eql(u8, fmt, "o")) {
-            try writer.print(
-                std.fmt.comptimePrint("{{o:0>{}}}", .{mode_len}),
-                .{@intFromEnum(self)},
-            );
-        } else {
-            const label = switch (self) {
-                .tree => "tree",
-                .submodule => "submodule",
-                else => "blob",
-            };
-
-            try writer.print("{s}", .{label});
-        }
-    }
-};
-
-mode: Mode = .blob,
+mode_type: ModeType = .blob,
 name: []const u8,
 object_id: ObjectId,
 
@@ -83,7 +36,7 @@ pub fn deserialize(allocator: Allocator, data: []const u8) !Entry {
     var offset: usize = 0;
 
     const mode_end = std.mem.indexOf(u8, data[offset..], " ") orelse return error.InvalidFormat;
-    const mode = try Mode.parse(data[offset..(offset + mode_end)]);
+    const parsed_mode = try file.Mode.parse(data[offset..(offset + mode_end)]);
     offset += mode_end + 1;
 
     const name_end = std.mem.indexOf(u8, data[offset..], "\x00") orelse return error.InvalidFormat;
@@ -98,7 +51,7 @@ pub fn deserialize(allocator: Allocator, data: []const u8) !Entry {
     @memcpy(object_id.bytes[0..hash_size], data[offset..(offset + hash_size)]);
 
     return .{
-        .mode = mode,
+        .mode_type = ModeType.of(parsed_mode),
         .name = name,
         .object_id = object_id,
     };
@@ -111,7 +64,7 @@ pub fn serialize(self: *const Entry, allocator: Allocator) ![]u8 {
     const total_len = mode_len + 1 + self.name.len + 1 + hash_size;
     const result = try allocator.alloc(u8, total_len);
 
-    _ = try std.fmt.bufPrint(result[0..mode_len], "{o}", .{self.mode});
+    _ = try std.fmt.bufPrint(result[0..mode_len], "{any}", .{self.mode_type.mode()});
 
     var offset: usize = mode_len;
 
@@ -137,9 +90,16 @@ pub fn format(
     _: std.fmt.FormatOptions,
     writer: anytype,
 ) !void {
-    try writer.print("{o} {any} {any} {s}", .{
-        self.mode,
-        self.mode,
+    const mode_label = switch (self.mode_type) {
+        .none => "",
+        .tree => "tree",
+        .submodule => "submodule",
+        else => "blob",
+    };
+
+    try writer.print("{any} {s} {any} {s}", .{
+        self.mode_type.mode(),
+        mode_label,
         self.object_id,
         self.name,
     });
@@ -160,9 +120,9 @@ pub fn lessThan(_: void, lhs: Entry, rhs: Entry) bool {
         }
     }
 
-    if (lhs.mode == .tree and rhs.mode != .tree) {
+    if (lhs.mode_type == .tree and rhs.mode_type != .tree) {
         return rhs.name.len > n and std.math.order('/', rhs.name[n]) == .lt;
-    } else if (lhs.mode != .tree and rhs.mode == .tree) {
+    } else if (lhs.mode_type != .tree and rhs.mode_type == .tree) {
         return lhs.name.len <= n or std.math.order(lhs.name[n], '/') == .lt;
     }
 
@@ -177,7 +137,7 @@ test "serialize and deserialize" {
     const oid = try ObjectId.parseHex("fedcba0987654321fedcba0987654321fedcba09");
 
     const entry = init(.{
-        .mode = .executable,
+        .mode_type = .executable,
         .name = @constCast(test_name),
         .object_id = oid,
     });
@@ -188,7 +148,7 @@ test "serialize and deserialize" {
     var deserialized = try deserialize(allocator, serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(deserialized.mode == .executable);
+    try std.testing.expect(deserialized.mode_type == .executable);
     try std.testing.expectEqualSlices(u8, test_name, deserialized.name);
     try std.testing.expect(oid.eql(&deserialized.object_id));
 }
@@ -206,7 +166,7 @@ test "format" {
     defer buf.deinit();
 
     const entry = init(.{
-        .mode = .executable,
+        .mode_type = .executable,
         .name = @constCast(test_name),
         .object_id = oid,
     });
@@ -223,7 +183,7 @@ test "sort" {
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });
     const aout_exe = init(.{
-        .mode = .executable,
+        .mode_type = .executable,
         .name = @constCast("a.out"),
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });
@@ -236,7 +196,7 @@ test "sort" {
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });
     const lib_dir = init(.{
-        .mode = .tree,
+        .mode_type = .tree,
         .name = @constCast("lib"),
         .object_id = try ObjectId.parseHex(empty_file_hash),
     });

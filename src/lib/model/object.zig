@@ -129,7 +129,7 @@ test "tree with object interface" {
     defer deserialized.deinit(allocator);
 
     try std.testing.expect(deserialized.tree.entries.items.len == 1);
-    try std.testing.expect(deserialized.tree.entries.items[0].mode == .blob);
+    try std.testing.expect(deserialized.tree.entries.items[0].mode_type == .blob);
     try std.testing.expect(std.mem.eql(u8, deserialized.tree.entries.items[0].name, "README.md"));
 
     var buf = std.ArrayList(u8).init(allocator);
