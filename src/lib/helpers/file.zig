@@ -474,6 +474,11 @@ pub const Mode = packed struct(u16) {
         return @bitCast(bits);
     }
 
+    /// Returns the integer value for this mode.
+    pub fn toInt(self: Mode) u16 {
+        return @bitCast(self);
+    }
+
     /// Returns `true` if the modes are equal.
     pub inline fn eql(a: *const Mode, b: *const Mode) bool {
         const a_bits: u16 = @bitCast(a.*);
@@ -516,7 +521,7 @@ pub const Mode = packed struct(u16) {
     }
 };
 
-test "mode from integer" {
+test "mode from an to integer" {
     const test_cases = [_]struct { u16, Mode }{
         .{ 0, Mode{} },
         .{ 0o160764, Mode{
@@ -532,8 +537,10 @@ test "mode from integer" {
     for (test_cases) |c| {
         const bits, const expected = c;
         const mode = Mode.of(bits);
+        const re = mode.toInt();
 
         try std.testing.expect(Mode.eql(&mode, &expected));
+        try std.testing.expect(bits == re);
     }
 }
 

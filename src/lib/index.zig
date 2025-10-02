@@ -3,8 +3,6 @@
 
 //! Package for the handling of the index file format.
 
-pub const FileMode = @import("index/file_mode.zig").FileMode;
-
 pub const Index = @import("index/index.zig").Index;
 pub const IndexSha1 = @import("index/index.zig").IndexSha1;
 pub const IndexSha256 = @import("index/index.zig").IndexSha256;

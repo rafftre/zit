@@ -220,7 +220,14 @@ test "index" {
         .mtime = 0x1390fe681daeebc6,
         .device = 2053,
         .inode = 14_954_102,
-        .file_mode = .regular_file,
+        .file_mode = .{
+            .type = .regular_file,
+            .permissions = .{
+                .user = .{ .read = true, .write = true },
+                .group = .{ .read = true },
+                .others = .{ .read = true },
+            },
+        },
         .user_id = 1000,
         .group_id = 1000,
         .file_size = 2,

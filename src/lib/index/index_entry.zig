@@ -5,7 +5,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const helpers = @import("../helpers.zig");
-const FileMode = @import("file_mode.zig").FileMode;
+const FileMode = helpers.file.Mode;
 
 pub const EntrySha1 = Entry(helpers.hash.Sha1.hash_size);
 pub const EntrySha256 = Entry(helpers.hash.Sha256.hash_size);
@@ -29,7 +29,7 @@ pub fn Entry(comptime hash_size: usize) type {
         //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         //  | inode                                                         |
         //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        //  | file mode                                                     |
+        //  | 0                             | file mode                     |
         //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
         //  | user ID                                                       |
         //  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -114,7 +114,7 @@ pub fn Entry(comptime hash_size: usize) type {
                 .mtime = @as(u64, mtime_sec) * std.time.ns_per_s + mtime_nsec,
                 .device = std.mem.readInt(u32, data[16..20], .big),
                 .inode = std.mem.readInt(u32, data[20..24], .big),
-                .file_mode = FileMode.ofNum(std.mem.readInt(u32, data[24..28], .big)),
+                .file_mode = FileMode.of(std.mem.readInt(u16, data[26..28], .big)),
                 .user_id = std.mem.readInt(u32, data[28..32], .big),
                 .group_id = std.mem.readInt(u32, data[32..36], .big),
                 .file_size = std.mem.readInt(u32, data[36..40], .big),
@@ -138,7 +138,7 @@ pub fn Entry(comptime hash_size: usize) type {
             const ctime_nsec: u32 = @intCast(@mod(self.ctime, std.time.ns_per_s));
             const mtime_sec: u32 = @intCast(@divFloor(self.mtime, std.time.ns_per_s));
             const mtime_nsec: u32 = @intCast(@mod(self.mtime, std.time.ns_per_s));
-            const file_mode = @intFromEnum(self.file_mode);
+            const file_mode = @as(u32, self.file_mode.toInt());
 
             try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, ctime_sec)));
             try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, ctime_nsec)));
@@ -209,7 +209,14 @@ test "entry" {
                 .mtime = 0x1390fe681daeebc6,
                 .device = 2053,
                 .inode = 14_954_102,
-                .file_mode = .regular_file,
+                .file_mode = .{
+                    .type = .regular_file,
+                    .permissions = .{
+                        .user = .{ .read = true, .write = true },
+                        .group = .{ .read = true },
+                        .others = .{ .read = true },
+                    },
+                },
                 .user_id = 1000,
                 .group_id = 1000,
                 .file_size = 2,
@@ -240,7 +247,14 @@ test "entry" {
                 .mtime = 0x1390fe681daeebc6,
                 .device = 2053,
                 .inode = 14_954_102,
-                .file_mode = .regular_file,
+                .file_mode = .{
+                    .type = .regular_file,
+                    .permissions = .{
+                        .user = .{ .read = true, .write = true },
+                        .group = .{ .read = true },
+                        .others = .{ .read = true },
+                    },
+                },
                 .user_id = 1000,
                 .group_id = 1000,
                 .file_size = 2,
@@ -271,7 +285,14 @@ test "entry" {
                 .mtime = 0x1390fe681daeebc6,
                 .device = 2053,
                 .inode = 14_954_102,
-                .file_mode = .regular_file,
+                .file_mode = .{
+                    .type = .regular_file,
+                    .permissions = .{
+                        .user = .{ .read = true, .write = true },
+                        .group = .{ .read = true },
+                        .others = .{ .read = true },
+                    },
+                },
                 .user_id = 1000,
                 .group_id = 1000,
                 .file_size = 2,
@@ -314,7 +335,7 @@ fn expectEntry(allocator: Allocator, bytes: []u8, expected: *EntrySha1, version:
     try std.testing.expect(entry.mtime == expected.mtime);
     try std.testing.expect(entry.device == expected.device);
     try std.testing.expect(entry.inode == expected.inode);
-    try std.testing.expect(entry.file_mode == expected.file_mode);
+    try std.testing.expect(entry.file_mode.eql(&expected.file_mode));
     try std.testing.expect(entry.user_id == expected.user_id);
     try std.testing.expect(entry.group_id == expected.group_id);
     try std.testing.expect(entry.file_size == expected.file_size);
