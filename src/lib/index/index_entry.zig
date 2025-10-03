@@ -75,6 +75,19 @@ pub fn Entry(comptime hash_size: usize) type {
             allocator.free(self.path_name);
         }
 
+        /// Comparison function for use with `std.mem.sort`.
+        pub fn lessThan(_: void, lhs: Self, rhs: Self) bool {
+            // Sort entries in ascending order on the name field, interpreted as a string of unsigned bytes
+            // (i.e. memcmp() order, no localization, no special casing of directory separator '/').
+            // Entries with the same name are sorted by their stage field.
+
+            return switch (std.mem.order(u8, lhs.path_name, rhs.path_name)) {
+                .eq => @intFromEnum(lhs.flags.stage) < @intFromEnum(rhs.flags.stage),
+                .lt => true,
+                .gt => false,
+            };
+        }
+
         /// Parses an index entry from `data` using index format `version`.
         /// Returns a tuple with the parsed entry and the length in bytes.
         /// Free result entry with `deinit`.
@@ -435,6 +448,13 @@ pub const Flags = packed struct(u16) {
     pub fn toBytes(self: Flags) [2]u8 {
         return std.mem.toBytes(std.mem.nativeToBig(u16, @bitCast(self)));
     }
+
+    pub inline fn eql(a: *const Flags, b: *const Flags) bool {
+        return a.assume_valid == b.assume_valid and
+            a.extended == b.extended and
+            a.stage == b.stage and
+            a.name_length == b.name_length;
+    }
 };
 
 test "flags" {
@@ -450,20 +470,13 @@ test "flags" {
 
     for (test_cases) |c| {
         const n, const expected = c;
-        try expectFlags(n, expected);
+
+        const flags = Flags.of(n);
+        try std.testing.expect(flags.eql(&expected));
+
+        const reconstructed = flags.toBytes();
+        try std.testing.expect(std.mem.eql(u8, &n, &reconstructed));
     }
-}
-
-fn expectFlags(bytes: [2]u8, expected: Flags) !void {
-    const flags = Flags.of(bytes);
-    const reconstructed = flags.toBytes();
-
-    try std.testing.expect(std.mem.eql(u8, &bytes, &reconstructed));
-
-    try std.testing.expect(flags.assume_valid == expected.assume_valid);
-    try std.testing.expect(flags.extended == expected.extended);
-    try std.testing.expect(flags.stage == expected.stage);
-    try std.testing.expect(flags.name_length == expected.name_length);
 }
 
 /// Index entry extended flags, used from index format v3.
@@ -491,6 +504,10 @@ pub const ExtendedFlags = packed struct(u16) {
     pub fn toBytes(self: ExtendedFlags) [2]u8 {
         return std.mem.toBytes(std.mem.nativeToBig(u16, @bitCast(self)));
     }
+
+    pub inline fn eql(a: *const ExtendedFlags, b: *const ExtendedFlags) bool {
+        return a.skip_worktree == b.skip_worktree and a.intent_to_add == b.intent_to_add;
+    }
 };
 
 test "extended flags" {
@@ -502,16 +519,11 @@ test "extended flags" {
 
     for (test_cases) |c| {
         const n, const expected = c;
-        try expectExtendedFlags(n, expected);
+
+        const flags = ExtendedFlags.of(n);
+        try std.testing.expect(flags.eql(&expected));
+
+        const reconstructed = flags.toBytes();
+        try std.testing.expect(std.mem.eql(u8, &n, &reconstructed));
     }
-}
-
-fn expectExtendedFlags(bytes: [2]u8, expected: ExtendedFlags) !void {
-    const flags = ExtendedFlags.of(bytes);
-    const reconstructed = flags.toBytes();
-
-    try std.testing.expect(std.mem.eql(u8, &bytes, &reconstructed));
-
-    try std.testing.expect(flags.skip_worktree == expected.skip_worktree);
-    try std.testing.expect(flags.intent_to_add == expected.intent_to_add);
 }

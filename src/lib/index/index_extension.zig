@@ -52,13 +52,6 @@ pub const Extension = union(enum(u32)) {
         }
     }
 
-    /// Writes this index extension to `buffer`.
-    pub fn writeTo(self: *const Extension, buffer: *std.ArrayList(u8)) !void {
-        switch (self.*) {
-            inline else => |*s| try s.*.writeTo(buffer),
-        }
-    }
-
     /// Parses an index extension from `data`.
     /// Returns a tuple with the parsed extension and the length in bytes.
     /// Free returned extension with `deinit`.
@@ -99,6 +92,13 @@ pub const Extension = union(enum(u32)) {
             .extension = instance,
             .len = total_len,
         };
+    }
+
+    /// Writes this index extension to `buffer`.
+    pub fn writeTo(self: *const Extension, buffer: *std.ArrayList(u8)) !void {
+        switch (self.*) {
+            inline else => |*s| try s.*.writeTo(buffer),
+        }
     }
 };
 

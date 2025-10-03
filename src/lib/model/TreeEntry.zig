@@ -115,8 +115,8 @@ pub fn lessThan(_: void, lhs: Entry, rhs: Entry) bool {
     for (lhs.name[0..n], rhs.name[0..n]) |lhs_elem, rhs_elem| {
         switch (std.math.order(lhs_elem, rhs_elem)) {
             .eq => continue,
-            .lt => return true, //return .lt,
-            .gt => return false, //return .gt,
+            .lt => return true,
+            .gt => return false,
         }
     }
 

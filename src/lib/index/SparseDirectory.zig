@@ -22,16 +22,16 @@ pub inline fn interface(self: SparseDirectory) Extension {
 /// Frees referenced resources.
 pub fn deinit(_: *const SparseDirectory, _: Allocator) void {}
 
+/// Parses an index extension from `data`.
+pub fn parse(_: Allocator, _: Signature, _: []u8) !SparseDirectory {
+    return .{};
+}
+
 /// Writes the index extension to `buffer`.
 pub fn writeTo(_: *const SparseDirectory, buffer: *std.ArrayList(u8)) !void {
     const type_bytes = Signature.sparse_directory.toBytes();
     try buffer.appendSlice(&type_bytes);
     try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, 0)));
-}
-
-/// Parses an index extension from `data`.
-pub fn parse(_: Allocator, _: Signature, _: []u8) !SparseDirectory {
-    return .{};
 }
 
 test "sparse directory extension" {

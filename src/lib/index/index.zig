@@ -8,6 +8,7 @@ const helpers = @import("../helpers.zig");
 
 const index_entry = @import("index_entry.zig");
 const IndexExtension = @import("index_extension.zig").Extension;
+const SparseDirectory = @import("SparseDirectory.zig");
 
 const header_size = 12;
 const INDEX_SIGNATURE: u32 = std.mem.readInt(u32, "DIRC", .big);
@@ -53,11 +54,6 @@ pub fn Index(comptime Hasher: type) type {
         entries: std.ArrayList(Entry),
         extensions: std.ArrayList(IndexExtension),
         checksum: [hash_size]u8,
-        // TODO: sort entries in ascending order on the name field,
-        // interpreted as a string of unsigned bytes
-        // (i.e. memcmp() order, no localization, no special casing of directory separator '/').
-        // Entries with the same name are sorted by their stage field.
-        // NB. exclude SplitIndexExtension enties at start (sort only remaining ones)
 
         /// Frees referenced resources.
         pub fn deinit(self: *const Self) void {
@@ -116,13 +112,21 @@ pub fn Index(comptime Hasher: type) type {
             }
 
             // extensions
-            const extensions = std.ArrayList(IndexExtension).init(allocator);
+            var extensions = std.ArrayList(IndexExtension).init(allocator);
             errdefer deinitExtensions(extensions);
 
-            // TODO: parse extensions
+            if (pos < (data.len - hash_size)) {
+                const parsed = try IndexExtension.parse(allocator, data[pos..]);
+                try extensions.append(parsed.extension);
+                hasher.update(data[pos..(pos + parsed.len)]);
+                pos += parsed.len;
+            }
+
+            // TODO: exclude SplitIndexExtension enties at start (sort only remaining ones)
+            std.mem.sort(Entry, entries.items, {}, Entry.lessThan);
 
             // checksum
-            if (pos + hash_size != data.len) {
+            if ((pos + hash_size) != data.len) {
                 return error.InvalidFormat;
             }
             var checksum: [hash_size]u8 = undefined;
@@ -154,6 +158,8 @@ pub fn Index(comptime Hasher: type) type {
             try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, entry_count)));
 
             // entries
+            // TODO: exclude SplitIndexExtension enties at start (sort only remaining ones)
+            std.mem.sort(Entry, self.entries.items, {}, Entry.lessThan);
             for (self.entries.items) |*entry| {
                 try entry.writeTo(buffer, self.version);
             }
@@ -196,11 +202,13 @@ test "index" {
         0x80, 0x08, 't',  'e',
         's',  't',  '.',  't',
         'x',  't',  0,    0,
-        0x63, 0x52, 0xc0, 0x83,
-        0x9c, 0x74, 0xa9, 0x70,
-        0x89, 0xc0, 0x87, 0x61,
-        0xe4, 0x2b, 0x18, 0xd,
-        0x62, 0xa9, 0xda, 0xd6,
+        's',  'd',  'i',  'r',
+        0,    0,    0,    0,
+        0x13, 0x85, 0xdb, 0x8f,
+        0x48, 0x2c, 0x19, 0xc,
+        0x14, 0x10, 0x52, 0xb2,
+        0x64, 0x7c, 0x41, 0x25,
+        0x3a, 0x5f, 0x88, 0x34,
     });
 
     var expected: IndexSha1 = .{
@@ -209,8 +217,8 @@ test "index" {
         .entries = std.ArrayList(IndexSha1.Entry).init(allocator),
         .extensions = std.ArrayList(IndexExtension).init(allocator),
         .checksum = [_]u8{
-            0x63, 0x52, 0xc0, 0x83, 0x9c, 0x74, 0xa9, 0x70, 0x89, 0xc0,
-            0x87, 0x61, 0xe4, 0x2b, 0x18, 0xd,  0x62, 0xa9, 0xda, 0xd6,
+            0x13, 0x85, 0xdb, 0x8f, 0x48, 0x2c, 0x19, 0xc,  0x14, 0x10,
+            0x52, 0xb2, 0x64, 0x7c, 0x41, 0x25, 0x3a, 0x5f, 0x88, 0x34,
         },
     };
     defer expected.deinit();
@@ -239,6 +247,9 @@ test "index" {
         .path_name = try allocator.dupeZ(u8, "test.txt"),
     });
 
+    const sparse_dir: SparseDirectory = .{};
+    try expected.extensions.append(sparse_dir.interface());
+
     const parsed = try IndexSha1.parse(allocator, bytes);
     defer parsed.deinit();
 
@@ -252,7 +263,9 @@ test "index" {
     }
     try std.testing.expect(parsed.extensions.items.len == expected.extensions.items.len);
     if (expected.extensions.items.len > 0) {
-        // TODO: test extensions?
+        for (parsed.extensions.items, expected.extensions.items) |*p, *e| {
+            try std.testing.expect(std.mem.eql(u8, @tagName(p.*), @tagName(e.*)));
+        }
     }
     try std.testing.expect(std.mem.eql(u8, &parsed.checksum, &expected.checksum));
 
@@ -367,4 +380,35 @@ test "index errors" {
         0,    0,    0,    0,
     });
     try std.testing.expectError(error.InvalidChecksum, IndexSha1.parse(allocator, invalid_checksum));
+
+    const invalid_extension: []u8 = @constCast(&[_]u8{
+        'D',  'I',  'R',  'C',
+        0,    0,    0,    0x02,
+        0,    0,    0,    0x01,
+        0x54, 0x09, 0x76, 0xe6,
+        0x1d, 0x81, 0x6f, 0xc6,
+        0x54, 0x09, 0x76, 0xe6,
+        0x1d, 0x81, 0x6f, 0xc6,
+        0,    0,    0x08, 0x05,
+        0,    0xe4, 0x2e, 0x76,
+        0,    0,    0x81, 0xa4,
+        0,    0,    0x03, 0xe8,
+        0,    0,    0x03, 0xe8,
+        0,    0,    0,    0x02,
+        0x01, 0x23, 0x45, 0x67,
+        0x89, 0xab, 0xcd, 0xef,
+        0xfe, 0xdc, 0xba, 0x98,
+        0x76, 0x54, 0x32, 0x10,
+        0x0f, 0x1e, 0x2d, 0x3c,
+        0x80, 0x08, 't',  'e',
+        's',  't',  '.',  't',
+        'x',  't',  0,    0,
+        'S',  'I',  'G',  'N',
+        0,    0,    0,    4,
+        0xc7, 0x72, 0xd3, 0xf3,
+        0xe0, 0x92, 0x58, 0x3c,
+        0x59, 0x5f, 0xc7, 0xff,
+        0x84, 0xca, 0x78, 0xc8,
+    });
+    try std.testing.expectError(error.InvalidFormat, IndexSha1.parse(allocator, invalid_extension));
 }

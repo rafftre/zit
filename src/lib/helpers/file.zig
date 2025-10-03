@@ -190,9 +190,9 @@ test "access rights from integer" {
 
     inline for (test_cases) |c| {
         const bits, const expected = c;
-        const perm = AccessRights.of(bits);
+        const rights = AccessRights.of(bits);
 
-        try std.testing.expect(AccessRights.eql(&perm, &expected));
+        try std.testing.expect(rights.eql(&expected));
     }
 }
 
@@ -222,9 +222,9 @@ test "parse access rights string" {
 
     for (test_cases) |c| {
         const s, const expected = c;
-        const perm = try AccessRights.parse(s);
+        const rights = try AccessRights.parse(s);
 
-        try std.testing.expect(AccessRights.eql(&perm, &expected));
+        try std.testing.expect(rights.eql(&expected));
     }
 
     // errors
@@ -361,7 +361,7 @@ test "permissions from integer" {
         const bits, const expected = c;
         const perm = Permissions.of(bits);
 
-        try std.testing.expect(Permissions.eql(&perm, &expected));
+        try std.testing.expect(perm.eql(&expected));
     }
 }
 
@@ -394,7 +394,7 @@ test "parse permissions string" {
         const s, const expected = c;
         const perm = try Permissions.parse(s);
 
-        try std.testing.expect(Permissions.eql(&perm, &expected));
+        try std.testing.expect(perm.eql(&expected));
     }
 
     // errors
@@ -539,7 +539,7 @@ test "mode from an to integer" {
         const mode = Mode.of(bits);
         const re = mode.toInt();
 
-        try std.testing.expect(Mode.eql(&mode, &expected));
+        try std.testing.expect(mode.eql(&expected));
         try std.testing.expect(bits == re);
     }
 }
@@ -569,7 +569,7 @@ test "parse mode string" {
         const s, const expected = c;
         const mode = try Mode.parse(s);
 
-        try std.testing.expect(Mode.eql(&mode, &expected));
+        try std.testing.expect(mode.eql(&expected));
     }
 
     // errors

@@ -25,20 +25,20 @@ pub fn deinit(self: *const UnknownExtension, allocator: Allocator) void {
     allocator.free(self.data);
 }
 
-/// Writes the index extension to `buffer`.
-pub fn writeTo(self: *const UnknownExtension, buffer: *std.ArrayList(u8)) !void {
-    const type_bytes = self.signature.toBytes();
-    try buffer.appendSlice(&type_bytes);
-    try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, @intCast(self.data.len))));
-    try buffer.appendSlice(self.data);
-}
-
 /// Parses an index extension from `data`.
 pub fn parse(allocator: Allocator, signature: Signature, data: []u8) !UnknownExtension {
     return .{
         .signature = signature,
         .data = try allocator.dupe(u8, data),
     };
+}
+
+/// Writes the index extension to `buffer`.
+pub fn writeTo(self: *const UnknownExtension, buffer: *std.ArrayList(u8)) !void {
+    const type_bytes = self.signature.toBytes();
+    try buffer.appendSlice(&type_bytes);
+    try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, @intCast(self.data.len))));
+    try buffer.appendSlice(self.data);
 }
 
 test "unknown extension" {
