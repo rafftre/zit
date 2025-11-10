@@ -45,7 +45,7 @@ pub fn Entry(comptime hash_size: usize) type {
         //  +-+-+-+-:-+-+-+-+-+-+-+-+-+-+-+-:=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
         //  | flags                         : extended flags (v3>)          :
         //  +-+-+-+-:-+-+-+-+-+-+-+-+-+-+-+-:=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+=+
-        //  | path name...                                                  |
+        //  | path...                                                       |
         //  |                                                               |
         //  |                                         +-+-+-+-+-+-+-+-+-+-+-+
         //  |                                                :...null bytes |
@@ -66,22 +66,21 @@ pub fn Entry(comptime hash_size: usize) type {
         hash: [hash_size]u8,
         flags: Flags,
         extended_flags: ?ExtendedFlags = null, // requires flags.extended == true
-        path_name: [:0]const u8,
+        path: [:0]const u8,
 
         const Self = @This();
 
         /// Frees referenced resources.
         pub fn deinit(self: *const Self, allocator: Allocator) void {
-            allocator.free(self.path_name);
+            allocator.free(self.path);
         }
 
         /// Comparison function for use with `std.mem.sort`.
+        /// Sort entries in ascending order on the name field, interpreted as a string of unsigned bytes
+        /// (i.e. memcmp() order, no localization, no special casing of directory separator '/').
+        /// Entries with the same name are sorted by their stage field.
         pub fn lessThan(_: void, lhs: Self, rhs: Self) bool {
-            // Sort entries in ascending order on the name field, interpreted as a string of unsigned bytes
-            // (i.e. memcmp() order, no localization, no special casing of directory separator '/').
-            // Entries with the same name are sorted by their stage field.
-
-            return switch (std.mem.order(u8, lhs.path_name, rhs.path_name)) {
+            return switch (std.mem.order(u8, lhs.path, rhs.path)) {
                 .eq => @intFromEnum(lhs.flags.stage) < @intFromEnum(rhs.flags.stage),
                 .lt => true,
                 .gt => false,
@@ -96,6 +95,7 @@ pub fn Entry(comptime hash_size: usize) type {
             len: usize,
         } {
             if (data.len < 62) {
+                // std.log.err("Found unexpected entry length: {d} < 62", .{data.len});
                 return error.UnexpectedEndOfFile;
             }
 
@@ -108,6 +108,7 @@ pub fn Entry(comptime hash_size: usize) type {
             var extended_flags: ?ExtendedFlags = null;
             if (version >= 3 and flags.extended) {
                 if (data.len < 64) {
+                    // std.log.err("Found unexpected entry length: {d} < 64", .{data.len});
                     return error.UnexpectedEndOfFile;
                 }
                 extended_flags = ExtendedFlags.of(data[62..64].*);
@@ -117,10 +118,10 @@ pub fn Entry(comptime hash_size: usize) type {
             if (extended_flags) |_| {
                 path_name_start = 64;
             }
-            const path_name = try parsePathName(allocator, data[path_name_start..], flags.name_length);
+            const path = try parsePathName(allocator, data[path_name_start..], flags.name_length);
 
-            const path_name_end = path_name_start + path_name.len + 1; // +1 is for the null-terminator
-            const pad_len = if (version == 4) 0 else 8 - (path_name_end % 8);
+            const path_name_end = path_name_start + path.len + 1; // +1 is for the null-terminator
+            const pad_len = calcPaddingLen(version, path_name_end);
 
             const entry: Self = .{
                 .ctime = @as(u64, ctime_sec) * std.time.ns_per_s + ctime_nsec,
@@ -134,7 +135,7 @@ pub fn Entry(comptime hash_size: usize) type {
                 .hash = data[40..(40 + hash_size)].*,
                 .flags = flags,
                 .extended_flags = extended_flags,
-                .path_name = path_name,
+                .path = path,
             };
 
             return .{
@@ -144,7 +145,7 @@ pub fn Entry(comptime hash_size: usize) type {
         }
 
         /// Writes the index entry to `buffer` using format `version`.
-        pub fn writeTo(self: *Self, buffer: *std.ArrayList(u8), version: u32) !void {
+        pub fn writeTo(self: *const Self, buffer: *std.ArrayList(u8), version: u32) !void {
             const start_pos = buffer.items.len;
 
             const ctime_sec: u32 = @intCast(@divFloor(self.ctime, std.time.ns_per_s));
@@ -164,6 +165,8 @@ pub fn Entry(comptime hash_size: usize) type {
             try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, self.group_id)));
             try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, self.file_size)));
             try buffer.appendSlice(&self.hash);
+
+            try self.checkPathNameLen();
             try buffer.appendSlice(&self.flags.toBytes());
 
             if (version >= 3 and self.flags.extended) {
@@ -172,16 +175,36 @@ pub fn Entry(comptime hash_size: usize) type {
                 }
             }
 
-            try buffer.appendSlice(self.path_name);
+            try buffer.appendSlice(self.path);
             try buffer.append(0); // null-terminator
 
-            if (version != 4) { // padding
-                const entry_len = buffer.items.len - start_pos;
-                const pad_len = 8 - (entry_len % 8);
-                for (0..pad_len) |_| {
-                    try buffer.append(0);
+            const pad_len = calcPaddingLen(version, buffer.items.len - start_pos);
+            for (0..pad_len) |_| {
+                try buffer.append(0);
+            }
+        }
+
+        /// Returns true if the entry is changed in comparison to the provided file stats.
+        pub fn isChanged(self: *const Self, stat: std.fs.File.Stat) bool {
+            if (self.extended_flags) |ext| {
+                if (ext.intent_to_add and self.flags.extended) {
+                    return true;
                 }
             }
+
+            // FIXME: check mode changes, see ce_match_stat_basic
+
+            const ctime: i128 = @intCast(self.ctime);
+            const mtime: i128 = @intCast(self.mtime);
+
+            return self.file_size != stat.size or
+                ctime != stat.ctime or
+                mtime != stat.mtime;
+        }
+
+        /// Returns true if the entry has a merge stage.
+        pub inline fn isUnmerged(self: *const Self) bool {
+            return self.flags.stage != .none;
         }
 
         fn parsePathName(allocator: Allocator, data: []u8, name_length: u12) ![:0]const u8 {
@@ -197,7 +220,29 @@ pub fn Entry(comptime hash_size: usize) type {
 
             return allocator.dupeZ(u8, data[0..name_len]);
         }
+
+        inline fn checkPathNameLen(self: *const Self) !void {
+            const maxU12 = std.math.maxInt(u12);
+            const path_name_len = if (self.path.len > maxU12) maxU12 else self.path.len;
+            if (self.flags.name_length != path_name_len) {
+                // std.log.err("Entry flags doesn't match path name length: {d} != {d}", .{
+                //     self.flags.name_length,
+                //     path_name_len,
+                // });
+                return error.UnexpectedPathNameLength;
+            }
+        }
     };
+}
+
+inline fn calcPaddingLen(version: u32, entry_len: usize) usize {
+    if (version != 4) {
+        const rem = entry_len % 8;
+        if (rem > 0) {
+            return 8 - rem;
+        }
+    }
+    return 0;
 }
 
 test "entry" {
@@ -238,7 +283,44 @@ test "entry" {
                     0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
                 },
                 .flags = Flags{ .assume_valid = true, .name_length = 8 },
-                .path_name = "test.txt",
+                .path = "test.txt",
+            },
+        },
+        .{
+            2,
+            @constCast(&[_]u8{
+                0x54, 0x09, 0x76, 0xe6, 0x1d, 0x81, 0x6f, 0xc6,
+                0x54, 0x09, 0x76, 0xe6, 0x1d, 0x81, 0x6f, 0xc6,
+                0,    0,    0x08, 0x05, 0,    0xe4, 0x2e, 0x76,
+                0,    0,    0x81, 0xa4, 0,    0,    0x03, 0xe8,
+                0,    0,    0x03, 0xe8, 0,    0,    0,    0x02,
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10,
+                0x0f, 0x1e, 0x2d, 0x3c, 0x80, 0x09, 't',  'e',
+                's',  't',  '2',  '.',  't',  'x',  't',  0,
+            }),
+            .{
+                .ctime = 0x1390fe681daeebc6,
+                .mtime = 0x1390fe681daeebc6,
+                .device = 2053,
+                .inode = 14_954_102,
+                .file_mode = .{
+                    .type = .regular_file,
+                    .permissions = .{
+                        .user = .{ .read = true, .write = true },
+                        .group = .{ .read = true },
+                        .others = .{ .read = true },
+                    },
+                },
+                .user_id = 1000,
+                .group_id = 1000,
+                .file_size = 2,
+                .hash = [_]u8{
+                    0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc,
+                    0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
+                },
+                .flags = Flags{ .assume_valid = true, .name_length = 9 },
+                .path = "test2.txt",
             },
         },
         .{
@@ -277,7 +359,7 @@ test "entry" {
                 },
                 .flags = Flags{ .assume_valid = true, .extended = true, .name_length = 8 },
                 .extended_flags = ExtendedFlags{ .intent_to_add = true },
-                .path_name = "test.txt",
+                .path = "test.txt",
             },
         },
         .{
@@ -314,7 +396,7 @@ test "entry" {
                     0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
                 },
                 .flags = Flags{ .assume_valid = true, .name_length = 8 },
-                .path_name = "test.txt",
+                .path = "test.txt",
             },
         },
     };
@@ -363,7 +445,7 @@ fn expectEntry(allocator: Allocator, bytes: []u8, expected: *EntrySha1, version:
         try std.testing.expect(entry.extended_flags.?.intent_to_add == extended_flags.intent_to_add);
     }
 
-    try std.testing.expect(std.mem.eql(u8, entry.path_name, expected.path_name));
+    try std.testing.expect(std.mem.eql(u8, entry.path, expected.path));
 }
 
 test "entry errors" {
@@ -408,6 +490,34 @@ test "entry errors" {
         error.UnexpectedEndOfFile,
         EntrySha1.parse(allocator, too_short_path_name, 2),
     );
+
+    var buf = std.ArrayList(u8).init(allocator);
+    defer buf.deinit();
+
+    var unmatching_name_len: EntrySha1 = .{
+        .ctime = 0x1390fe681daeebc6,
+        .mtime = 0x1390fe681daeebc6,
+        .device = 2053,
+        .inode = 14_954_102,
+        .file_mode = .{
+            .type = .regular_file,
+            .permissions = .{
+                .user = .{ .read = true, .write = true },
+                .group = .{ .read = true },
+                .others = .{ .read = true },
+            },
+        },
+        .user_id = 1000,
+        .group_id = 1000,
+        .file_size = 2,
+        .hash = [_]u8{
+            0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc,
+            0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
+        },
+        .flags = Flags{ .assume_valid = true, .name_length = 9 },
+        .path = "test.txt",
+    };
+    try std.testing.expectError(error.UnexpectedPathNameLength, EntrySha1.writeTo(&unmatching_name_len, &buf, 2));
 }
 
 /// Flag used during merge.

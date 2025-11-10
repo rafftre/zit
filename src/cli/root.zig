@@ -13,6 +13,7 @@ const cat_file = @import("cat-file.zig").command;
 const hash_object = @import("hash-object.zig").command;
 const inflate = @import("inflate.zig").command;
 const init_repo = @import("init.zig").command;
+const ls_files = @import("ls-files.zig").command;
 const version = @import("version.zig").command;
 
 /// The interface for a command.
@@ -32,6 +33,7 @@ pub const commands = [_]Command{
     hash_object,
     inflate,
     init_repo,
+    ls_files,
     version,
 };
 

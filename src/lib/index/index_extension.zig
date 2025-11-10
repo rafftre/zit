@@ -60,6 +60,7 @@ pub const Extension = union(enum(u32)) {
         len: usize,
     } {
         if (data.len < 8) {
+            // std.log.err("Found unexpected extension length: {d} < 8", .{data.len});
             return error.UnexpectedEndOfFile;
         }
 
@@ -68,6 +69,7 @@ pub const Extension = union(enum(u32)) {
 
         const total_len = 8 + size;
         if (data.len < total_len) {
+            // std.log.err("Found unexpected extension length: {d} < {d}", .{ data.len, total_len });
             return error.UnexpectedEndOfFile;
         }
 

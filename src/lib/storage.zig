@@ -24,7 +24,7 @@ pub fn openGitRepository(allocator: Allocator, start_dir_name: ?[]const u8) !Rep
     var file_objects = try FileObjectStore.create(allocator, file_repo.git_dir_path);
 
     var repo = file_repo.interface(file_objects.interface());
-    try repo.open();
+    try repo.open(allocator);
     return repo;
 }
 

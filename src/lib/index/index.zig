@@ -79,6 +79,7 @@ pub fn Index(comptime Hasher: type) type {
         /// Free with `deinit`.
         pub fn parse(allocator: Allocator, data: []u8) !Self {
             if (data.len < header_size) {
+                // std.log.err("Found unexpected index length: {d} < {d}", .{ data.len, header_size });
                 return error.UnexpectedEndOfFile;
             }
 
@@ -87,15 +88,19 @@ pub fn Index(comptime Hasher: type) type {
             // header
             const signature = std.mem.readInt(u32, data[0..4], .big);
             if (signature != INDEX_SIGNATURE) {
+                // std.log.err("Found invalid index signature: {s}", .{data[0..4]});
                 return error.InvalidSignature;
             }
 
             const version = std.mem.readInt(u32, data[4..8], .big);
             if (version < 2 or version > 4) {
+                // std.log.err("Found unsupported index version: {d}", .{version});
                 return error.UnsupportedVersion;
             }
+            std.log.debug("Index has version {d}", .{version});
 
             const entry_count = std.mem.readInt(u32, data[8..header_size], .big);
+            std.log.debug("Index contains {d} entrie(s)", .{entry_count});
 
             var pos: usize = header_size;
             hasher.update(data[0..pos]);
@@ -120,13 +125,23 @@ pub fn Index(comptime Hasher: type) type {
                 try extensions.append(parsed.extension);
                 hasher.update(data[pos..(pos + parsed.len)]);
                 pos += parsed.len;
+
+                switch (parsed.extension) {
+                    .sparse_directory => {
+                        std.log.debug("Found extension 'sparse directory'", .{});
+                    },
+                    .unknown => |unk| {
+                        std.log.debug("Found unknown extension '{s}' of size {d}", .{ unk.signature.toBytes(), unk.data.len });
+                    },
+                }
             }
 
-            // TODO: exclude SplitIndexExtension enties at start (sort only remaining ones)
+            // TODO: exclude SplitIndexExtension entries at start (sort only remaining ones)
             std.mem.sort(Entry, entries.items, {}, Entry.lessThan);
 
             // checksum
             if ((pos + hash_size) != data.len) {
+                // std.log.err("Found invalid index length: {d} != {d}", .{ pos + hash_size, data.len });
                 return error.InvalidFormat;
             }
             var checksum: [hash_size]u8 = undefined;
@@ -137,6 +152,7 @@ pub fn Index(comptime Hasher: type) type {
             hasher.final(&calculated_checksum);
 
             if (!std.mem.eql(u8, &checksum, &calculated_checksum)) {
+                // std.log.err("Found invalid index checksum: {x} != {x}", .{ calculated_checksum, checksum });
                 return error.InvalidChecksum;
             }
 
@@ -158,7 +174,7 @@ pub fn Index(comptime Hasher: type) type {
             try buffer.appendSlice(&std.mem.toBytes(std.mem.nativeToBig(u32, entry_count)));
 
             // entries
-            // TODO: exclude SplitIndexExtension enties at start (sort only remaining ones)
+            // TODO: exclude SplitIndexExtension entries at start (sort only remaining ones)
             std.mem.sort(Entry, self.entries.items, {}, Entry.lessThan);
             for (self.entries.items) |*entry| {
                 try entry.writeTo(buffer, self.version);
@@ -173,6 +189,24 @@ pub fn Index(comptime Hasher: type) type {
             var checksum: [hash_size]u8 = undefined;
             Hasher.hashData(buffer.items, &checksum);
             try buffer.appendSlice(&checksum);
+        }
+
+        /// Returns true if `path` is a prefix of an entry in the index.
+        pub fn containsPrefix(self: *const Self, path: [:0]const u8, unmerged: bool) bool {
+            for (self.entries.items) |entry| {
+                if (std.mem.startsWith(u8, entry.path, path)) {
+                    return !unmerged or entry.isUnmerged();
+                }
+            }
+            return false;
+        }
+
+        /// Returns true if the index contains an entry matching `path`.
+        /// Uses only exact match of strings and does not check for
+        /// - unmerged files;
+        /// - directory paths ending with "/".
+        pub fn contains(self: *const Self, path: [:0]const u8) bool {
+            return self.containsPrefix(path, false);
         }
     };
 }
@@ -244,7 +278,7 @@ test "index" {
             0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
         },
         .flags = index_entry.Flags{ .assume_valid = true, .name_length = 8 },
-        .path_name = try allocator.dupeZ(u8, "test.txt"),
+        .path = try allocator.dupeZ(u8, "test.txt"),
     });
 
     const sparse_dir: SparseDirectory = .{};
@@ -258,7 +292,7 @@ test "index" {
     try std.testing.expect(parsed.entries.items.len == expected.entries.items.len);
     if (expected.entries.items.len > 0) {
         for (parsed.entries.items, expected.entries.items) |*p, *e| {
-            try std.testing.expect(std.mem.eql(u8, p.path_name, e.path_name));
+            try std.testing.expect(std.mem.eql(u8, p.path, e.path));
         }
     }
     try std.testing.expect(parsed.extensions.items.len == expected.extensions.items.len);

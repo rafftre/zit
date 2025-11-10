@@ -17,7 +17,7 @@ objects: ObjectStore,
 
 /// Opens an existing repository.
 /// Use `closeFn` to free up used resources.
-openFn: *const fn (ptr: *anyopaque) anyerror!void,
+openFn: *const fn (ptr: *anyopaque, allocator: Allocator) anyerror!void,
 
 /// Frees up used resources.
 closeFn: *const fn (ptr: *anyopaque, allocator: Allocator) void,
@@ -26,11 +26,18 @@ closeFn: *const fn (ptr: *anyopaque, allocator: Allocator) void,
 /// It can be a path, an URL or something else - the implementation determines that.
 nameFn: *const fn (ptr: *anyopaque) ?[]const u8,
 
+/// Returns the path of the worktree, if available.
+worktreeFn: *const fn (ptr: *anyopaque) ?[]const u8,
+
+/// Returns the content of the index file.
+/// Caller owns the returned memory.
+readIndexFn: *const fn (ptr: *anyopaque, allocator: Allocator) anyerror![]u8,
+
 /// Interface function wrapper.
 /// Propagates to the object store.
-pub fn open(r: Repository) !void {
+pub fn open(r: Repository, allocator: Allocator) !void {
     try r.objects.open();
-    try r.openFn(r.ptr);
+    try r.openFn(r.ptr, allocator);
 }
 
 /// Interface function wrapper.
@@ -43,4 +50,14 @@ pub fn close(r: Repository, allocator: Allocator) void {
 /// Interface function wrapper.
 pub fn name(r: Repository) ?[]const u8 {
     return r.nameFn(r.ptr);
+}
+
+/// Interface function wrapper.
+pub fn worktree(r: Repository) ?[]const u8 {
+    return r.worktreeFn(r.ptr);
+}
+
+/// Interface function wrapper.
+pub fn readIndex(r: Repository, allocator: Allocator) ![]u8 {
+    return r.readIndexFn(r.ptr, allocator);
 }

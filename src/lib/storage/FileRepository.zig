@@ -9,11 +9,15 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.fs.cwd;
 
+const index = @import("../index.zig");
+
 const env = @import("env.zig");
 const ObjectStore = @import("../ObjectStore.zig");
 const Repository = @import("../Repository.zig");
 
+const max_file_size = @import("../storage.zig").max_file_size;
 const default_git_dir = ".git";
+const index_file_name = "index";
 
 /// Returns an instance of the repository interface.
 pub fn interface(self: *FileRepository, objects: ObjectStore) Repository {
@@ -23,10 +27,13 @@ pub fn interface(self: *FileRepository, objects: ObjectStore) Repository {
         .openFn = open,
         .closeFn = destroy,
         .nameFn = name,
+        .worktreeFn = worktree,
+        .readIndexFn = readIndex,
     };
 }
 
 git_dir_path: []u8,
+work_dir_path: ?[]u8 = null,
 
 /// Creates a repository.
 /// Use `destroy` to free up used resources.
@@ -44,25 +51,56 @@ pub fn create(allocator: Allocator, dir_name: ?[]const u8) !*FileRepository {
 pub fn destroy(ptr: *anyopaque, allocator: Allocator) void {
     const self: *FileRepository = @ptrCast(@alignCast(ptr));
     allocator.free(self.git_dir_path);
-    //allocator.free(self);
-    //self.* = undefined;
+    if (self.work_dir_path) |p| {
+        allocator.free(p);
+    }
     allocator.destroy(self);
 }
 
 /// Opens an existing repository.
+/// Sets up the default worktree.
 /// Use `destroy` to free up used resources.
-pub fn open(ptr: *anyopaque) !void {
+pub fn open(ptr: *anyopaque, allocator: Allocator) !void {
     const self: *FileRepository = @ptrCast(@alignCast(ptr));
 
     // opens the directory to assert that exists
     var git_dir = try cwd().openDir(self.git_dir_path, .{});
     defer git_dir.close();
+
+    if (std.mem.endsWith(u8, self.git_dir_path, default_git_dir)) {
+        self.work_dir_path = try git_dir.realpathAlloc(allocator, "..");
+    }
 }
 
 /// Returns the path of the repository.
 pub fn name(ptr: *anyopaque) ?[]const u8 {
     const self: *FileRepository = @ptrCast(@alignCast(ptr));
     return self.git_dir_path;
+}
+
+/// Returns the path of the worktree, if available.
+pub fn worktree(ptr: *anyopaque) ?[]const u8 {
+    const self: *FileRepository = @ptrCast(@alignCast(ptr));
+    return self.work_dir_path;
+}
+
+/// Returns the content of the index file.
+/// Caller owns the returned memory.
+pub fn readIndex(ptr: *anyopaque, allocator: Allocator) ![]u8 {
+    const self: *FileRepository = @ptrCast(@alignCast(ptr));
+
+    var paths = .{ self.git_dir_path, index_file_name };
+
+    const file_path = try std.fs.path.join(allocator, &paths);
+    defer allocator.free(file_path);
+
+    const obj_file = try cwd().openFile(file_path, .{});
+    defer obj_file.close();
+
+    var stream = std.io.bufferedReader(obj_file.reader());
+    const reader = stream.reader();
+
+    return reader.readAllAlloc(allocator, max_file_size);
 }
 
 pub const SetupOptions = struct {
