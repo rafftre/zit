@@ -22,9 +22,13 @@ pub const readTypeAndSize = object_read.readTypeAndSize;
 pub const readEncodedData = object_read.readEncodedData;
 
 const cache = @import("lib/cache.zig");
-pub const listFiles = cache.listFiles;
+pub const listCached = cache.listCached;
+pub const listModified = cache.listModified;
+pub const listDeleted = cache.listDeleted;
+pub const listUnmerged = cache.listUnmerged;
+pub const listOthers = cache.listOthers;
+pub const listKilled = cache.listKilled;
 pub const File = cache.File;
-pub const ListFilesOptions = cache.ListFilesOptions;
 
 test {
     @import("std").testing.refAllDecls(@This());

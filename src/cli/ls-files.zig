@@ -78,7 +78,13 @@ pub const command = cli.Command{
 fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
-    var read_opts: zit.ListFilesOptions = .{};
+    var show_cached = false;
+    var show_others = false;
+    var show_stage_info = false;
+    var show_deleted = false;
+    var show_modified = false;
+    var show_unmerged = false;
+    var show_killed = false;
     var zero_terminated = false;
 
     var positional_args = std.ArrayList([]const u8).init(allocator);
@@ -89,19 +95,19 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         const arg = args[i];
 
         if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--cached")) {
-            read_opts.cached = true;
+            show_cached = true;
         } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--others")) {
-            read_opts.others = true;
+            show_others = true;
         } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--stage")) {
-            read_opts.add_stage_info = true;
+            show_stage_info = true;
         } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--deleted")) {
-            read_opts.deleted = true;
+            show_deleted = true;
         } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--modified")) {
-            read_opts.modified = true;
+            show_modified = true;
         } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--unmerged")) {
-            read_opts.unmerged = true;
+            show_unmerged = true;
         } else if (std.mem.eql(u8, arg, "-k") or std.mem.eql(u8, arg, "--killed")) {
-            read_opts.killed = true;
+            show_killed = true;
         } else if (std.mem.eql(u8, arg, "-z")) {
             zero_terminated = true;
         } else if (arg.len > 0 and arg[0] == '-') {
@@ -112,13 +118,19 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         }
     }
 
-    const files = zit.listFiles(allocator, repository.?, &read_opts) catch |err| switch (err) {
-        error.IgnoredWithoutOthersOrCached => {
-            try out.print("Error: '-i' must be used with either -o or -c.\n", .{});
-            return;
-        },
-        else => return err,
-    };
+    // forces stage info when unmerged files are requested
+    if (show_unmerged) {
+        show_stage_info = true;
+    }
+
+    // default to cached when other flags are missing
+    if (!show_cached and !show_others and !show_stage_info and
+        !show_deleted and !show_modified and !show_unmerged and !show_killed)
+    {
+        show_cached = true;
+    }
+
+    const files = try zit.listCached(allocator, repository);
     defer {
         for (files.items) |f| {
             allocator.free(f.path);
@@ -127,7 +139,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
     }
 
     for (files.items) |file| {
-        if (read_opts.add_stage_info and file.merge_stage != null) {
+        if (show_stage_info and file.merge_stage != null) {
             try out.print("{any} {any} {d}\t{s}", .{
                 file.mode,
                 file.object_id,
@@ -141,3 +153,14 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         try if (zero_terminated) out.print("\x00", .{}) else out.print("\n", .{});
     }
 }
+
+// fn showUntrakedFiles(allocator: Allocator, repository: anytype, show_others: bool, show_killed: bool) !void {
+//     var files = undefined;
+
+//     files = if (show_others) {
+//         try zit.listOthers(allocator, repository);
+//     } else{
+//         try zit.listOthers(allocator, repository);
+//     };
+
+// }
