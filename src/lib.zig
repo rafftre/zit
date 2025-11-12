@@ -11,8 +11,8 @@ pub const index = @import("lib/index.zig");
 pub const storage = @import("lib/storage.zig");
 
 pub const LooseObject = @import("lib/LooseObject.zig");
-pub const ObjectStore = @import("lib/ObjectStore.zig");
-pub const Repository = @import("lib/Repository.zig");
+pub const ObjectStore = @import("lib/object_store.zig").ObjectStore;
+pub const Repository = @import("lib/repository.zig").RepositorySha1;
 
 pub const hashObject = @import("lib/object-write.zig").hashObject;
 

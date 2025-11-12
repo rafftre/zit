@@ -52,7 +52,7 @@ pub const command = cli.Command{
     , .{ build_options.app_name, build_options.app_name, build_options.app_name }),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, repository: ?*Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var allow_unknown_type = false;
@@ -95,7 +95,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
             return;
         }
 
-        var obj = try zit.readObject(allocator, repository.?.objects, obj_name, expected_type);
+        var obj = try zit.readObject(allocator, repository.?.objectStore(), obj_name, expected_type);
         defer obj.deinit(allocator);
 
         const bytes = try obj.serialize(allocator);
@@ -116,7 +116,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
                 return;
             }
 
-            var obj = zit.readObject(allocator, repository.?.objects, obj_name, null) catch |err| switch (err) {
+            var obj = zit.readObject(allocator, repository.?.objectStore(), obj_name, null) catch |err| switch (err) {
                 error.FileNotFound => cli.fail(),
                 else => return err,
             };
@@ -127,12 +127,12 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
                 return;
             }
 
-            var obj = try zit.readObject(allocator, repository.?.objects, obj_name, null);
+            var obj = try zit.readObject(allocator, repository.?.objectStore(), obj_name, null);
             defer obj.deinit(allocator);
 
             try out.print("{any}", .{obj});
         } else if (get_size or get_type) {
-            const type_size = try zit.readTypeAndSize(allocator, repository.?.objects, obj_name, allow_unknown_type);
+            const type_size = try zit.readTypeAndSize(allocator, repository.?.objectStore(), obj_name, allow_unknown_type);
             if (get_size) {
                 try out.print("{d}\n", .{type_size.obj_size});
             } else {

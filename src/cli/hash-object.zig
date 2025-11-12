@@ -52,7 +52,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, repository: ?*Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var type_str: []const u8 = "blob";
@@ -91,7 +91,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
     if (use_stdin) {
         const in = std.io.getStdIn().reader();
 
-        const oid = try zit.hashObject(allocator, repository.?.objects, in, type_str, !literally, persist);
+        const oid = try zit.hashObject(allocator, repository.?.objectStore(), in, type_str, !literally, persist);
         defer allocator.free(oid);
 
         try out.print("{s}\n", .{oid});
@@ -104,7 +104,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         };
         defer file.close();
 
-        const oid = try zit.hashObject(allocator, repository.?.objects, file.reader(), type_str, true, persist);
+        const oid = try zit.hashObject(allocator, repository.?.objectStore(), file.reader(), type_str, true, persist);
         defer allocator.free(oid);
 
         try out.print("{s}\n", .{oid});

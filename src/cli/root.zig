@@ -18,7 +18,7 @@ const version = @import("version.zig").command;
 
 /// The interface for a command.
 pub const Command = struct {
-    run: *const fn (allocator: Allocator, repository: ?Repository, args: []const []const u8) anyerror!void,
+    run: *const fn (allocator: Allocator, repository: ?*Repository, args: []const []const u8) anyerror!void,
     name: []const u8,
     description: []const u8,
     usage_text: ?[]const u8,
@@ -43,7 +43,7 @@ pub fn run(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
 
     for (commands) |cmd| {
         if (std.mem.eql(u8, cmd.name, name)) {
-            var repository: ?Repository = null;
+            var repository: ?*Repository = null;
 
             if (cmd.require_repository) {
                 repository = zit.storage.openGitRepository(allocator, null) catch |err| switch (err) {
@@ -62,7 +62,7 @@ pub fn run(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
 
             defer {
                 if (repository) |repo| {
-                    repo.close(allocator);
+                    zit.storage.closeGitRepository(allocator, repo);
                 }
             }
 

@@ -3,7 +3,7 @@
 
 //! An object store implementation that uses the file-system with the Git rules.
 
-const FileObjectStore = @This();
+const Self = @This();
 
 const std = @import("std");
 const zlib = std.compress.zlib;
@@ -12,62 +12,43 @@ const Dir = std.fs.Dir;
 const cwd = std.fs.cwd;
 
 const env = @import("env.zig");
-const ObjectStore = @import("../ObjectStore.zig");
 
 const max_file_size = @import("../storage.zig").max_file_size;
-const default_object_dir = "objects";
+const DEFAULT_OBJECT_DIR_NAME = "objects";
+const INFO_DIR_NAME = "info";
+const PACK_DIR_NAME = "pack";
 
-/// Returns an instance of the object store interface.
-pub fn interface(self: *FileObjectStore) ObjectStore {
-    return .{
-        .ptr = self,
-        .openFn = open,
-        .closeFn = destroy,
-        .readFn = read,
-        .writeFn = write,
-    };
-}
+objects_dir_path: []u8 = undefined,
 
-objects_dir_path: []u8,
-
-/// Creates an object store.
-/// Use `destroy` to free up used resources.
-pub fn create(allocator: Allocator, git_dir_path: []u8) !*FileObjectStore {
+/// Initializes this struct.
+/// Use `deinit` to free up used resources.
+pub fn init(self: *Self, allocator: Allocator, git_dir_path: []u8) !void {
     const objects_dir_path = try env.get(allocator, env.GIT_OBJECT_DIR) orelse
-        try std.fs.path.join(allocator, &.{ git_dir_path, default_object_dir });
+        try std.fs.path.join(allocator, &.{ git_dir_path, DEFAULT_OBJECT_DIR_NAME });
     errdefer allocator.free(objects_dir_path);
 
     std.log.debug("Using objects dir {s}", .{objects_dir_path});
-    const res = try allocator.create(FileObjectStore);
-    res.objects_dir_path = objects_dir_path;
-    return res;
+    self.objects_dir_path = objects_dir_path;
 }
 
 /// Frees up used resources.
-pub fn destroy(ptr: *anyopaque, allocator: Allocator) void {
-    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
+pub fn deinit(self: *const Self, allocator: Allocator) void {
     allocator.free(self.objects_dir_path);
-    allocator.destroy(self);
 }
 
-/// Opens an existing store.
-/// Use `destroy` to free up used resources.
-pub fn open(ptr: *anyopaque) !void {
-    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
-
-    // opens the directory to assert that exists
-    var objects_dir = try cwd().openDir(self.objects_dir_path, .{});
+/// Creates the directory tree on the file system.
+pub fn setup(self: *const Self) !void {
+    var objects_dir = try cwd().makeOpenPath(self.objects_dir_path, .{});
     defer objects_dir.close();
+
+    try objects_dir.makePath(INFO_DIR_NAME);
+    try objects_dir.makePath(PACK_DIR_NAME);
 }
 
 /// Returns the raw content of an object in the store.
 /// Caller owns the returned memory.
-pub fn read(ptr: *anyopaque, allocator: Allocator, name: []const u8) ![]u8 {
-    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
-
-    var paths = .{ self.objects_dir_path, name[0..2], name[2..] };
-
-    const file_path = try std.fs.path.join(allocator, &paths);
+pub fn read(self: *const Self, allocator: Allocator, name: []const u8) ![]u8 {
+    const file_path = try self.looseObjectFilePath(allocator, name);
     defer allocator.free(file_path);
 
     const obj_file = try cwd().openFile(file_path, .{});
@@ -81,12 +62,8 @@ pub fn read(ptr: *anyopaque, allocator: Allocator, name: []const u8) ![]u8 {
 }
 
 /// Write the raw content of an object to the store.
-pub fn write(ptr: *anyopaque, allocator: Allocator, name: []const u8, bytes: []u8) !void {
-    const self: *FileObjectStore = @ptrCast(@alignCast(ptr));
-
-    var paths = .{ self.objects_dir_path, name[0..2] };
-
-    const dir_path = try std.fs.path.join(allocator, &paths);
+pub fn write(self: *const Self, allocator: Allocator, name: []const u8, bytes: []u8) !void {
+    const dir_path = try self.looseObjectDirPath(allocator, name);
     defer allocator.free(dir_path);
 
     var dest_dir = try cwd().makeOpenPath(dir_path, .{});
@@ -110,18 +87,14 @@ pub fn write(ptr: *anyopaque, allocator: Allocator, name: []const u8, bytes: []u
     };
 }
 
-/// Creates the directory tree and initializes an object store.
-/// Use `destroy` to free up used resources.
-pub fn setup(allocator: Allocator, git_dir_path: []u8) !*FileObjectStore {
-    const self = try create(allocator, git_dir_path);
+inline fn looseObjectDirPath(self: *const Self, allocator: Allocator, name: []const u8) ![]u8 {
+    var paths = .{ self.objects_dir_path, name[0..2] };
+    return try std.fs.path.join(allocator, &paths);
+}
 
-    var objects_dir = try cwd().makeOpenPath(self.objects_dir_path, .{});
-    defer objects_dir.close();
-
-    try objects_dir.makePath("info");
-    try objects_dir.makePath("pack");
-
-    return self;
+inline fn looseObjectFilePath(self: *const Self, allocator: Allocator, name: []const u8) ![]u8 {
+    var paths = .{ self.objects_dir_path, name[0..2], name[2..] };
+    return try std.fs.path.join(allocator, &paths);
 }
 
 /// Writes `bytes` in a temporary file at `dest_dir`.
@@ -163,4 +136,69 @@ fn generatePrefixedString(allocator: Allocator, prefix: []const u8, length: usiz
     }
 
     return result;
+}
+
+fn initTestStore(allocator: Allocator) !struct { tmp: std.testing.TmpDir, store: Self } {
+    var tmp = std.testing.tmpDir(.{});
+    errdefer tmp.cleanup();
+
+    const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(test_dir_path);
+
+    var store: Self = .{};
+    try store.init(allocator, test_dir_path);
+
+    return .{
+        .tmp = tmp,
+        .store = store,
+    };
+}
+
+test "store setup" {
+    const allocator = std.testing.allocator;
+
+    var ts = try initTestStore(allocator);
+    defer {
+        ts.store.deinit(allocator);
+        ts.tmp.cleanup();
+    }
+
+    const test_dir = ts.tmp.dir;
+    const store = ts.store;
+
+    try store.setup();
+
+    var objects_dir = try test_dir.openDir(DEFAULT_OBJECT_DIR_NAME, .{});
+    defer objects_dir.close();
+
+    // re-run
+    try store.setup();
+
+    try objects_dir.deleteDir(INFO_DIR_NAME);
+    try store.setup();
+
+    var sub_dir = try objects_dir.openDir(INFO_DIR_NAME, .{});
+    defer sub_dir.close();
+}
+
+test "write and read loose object" {
+    const allocator = std.testing.allocator;
+
+    var ts = try initTestStore(allocator);
+    defer {
+        ts.store.deinit(allocator);
+        ts.tmp.cleanup();
+    }
+
+    const store = ts.store;
+
+    const obj_name = "r3test";
+    const obj_data = "sample content";
+
+    try store.write(allocator, obj_name, @constCast(obj_data));
+
+    const read_data = try store.read(allocator, obj_name);
+    defer allocator.free(read_data);
+
+    try std.testing.expect(std.mem.eql(u8, read_data, obj_data));
 }

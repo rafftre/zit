@@ -76,7 +76,7 @@ pub const Object = union(Type) {
         writer: anytype,
     ) !void {
         switch (self) {
-            inline else => |s| return s.format(fmt, options, writer),
+            inline else => |s| try s.format(fmt, options, writer),
         }
     }
 };

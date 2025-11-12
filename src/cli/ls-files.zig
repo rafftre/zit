@@ -75,7 +75,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, repository: ?*Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var show_cached = false;
@@ -130,7 +130,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         show_cached = true;
     }
 
-    const files = try zit.listCached(allocator, repository);
+    const files = try zit.listCached(allocator, repository.?);
     defer {
         for (files.items) |f| {
             allocator.free(f.path);

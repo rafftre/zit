@@ -34,7 +34,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, repository: ?*Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var positional_args = std.ArrayList([]const u8).init(allocator);
@@ -55,7 +55,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
     if (positional_args.items.len > 0) {
         const hex = positional_args.items[0];
 
-        const encoded_data = try zit.readEncodedData(allocator, repository.?.objects, hex);
+        const encoded_data = try zit.readEncodedData(allocator, repository.?.objectStore(), hex);
         defer allocator.free(encoded_data);
 
         try out.print("{s}", .{encoded_data});
