@@ -18,7 +18,7 @@ pub const command = cli.Command{
     .usage_text = null,
 };
 
-fn run(_: Allocator, _: ?*Repository, _: []const []const u8) !void {
+fn run(_: Allocator, _: ?Repository, _: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
     try out.print("{s} version {s}\n", .{ build_options.app_name, build_options.app_version });
 }

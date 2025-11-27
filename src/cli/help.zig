@@ -22,7 +22,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(_: Allocator, _: ?*Repository, args: []const []const u8) !void {
+fn run(_: Allocator, _: ?Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     if (args.len == 0) {

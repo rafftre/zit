@@ -7,6 +7,7 @@ const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
 const Repository = zit.Repository;
+const GitRepository = zit.storage.GitRepositorySha1;
 
 const cli = @import("root.zig");
 
@@ -50,7 +51,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, _: ?*Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, _: ?Repository, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var is_bare = false;
@@ -87,7 +88,7 @@ fn run(allocator: Allocator, _: ?*Repository, args: []const []const u8) !void {
         }
     }
 
-    var options: zit.storage.CreateOptions = .{
+    var options: zit.storage.SetupOptions = .{
         .bare = is_bare,
         .name = if (positional_args.items.len > 0) positional_args.items[0] else null,
     };
@@ -95,8 +96,8 @@ fn run(allocator: Allocator, _: ?*Repository, args: []const []const u8) !void {
         options.initial_branch = branch;
     }
 
-    var repository = try zit.storage.createGitRepository(allocator, options);
-    defer zit.storage.closeGitRepository(allocator, repository);
+    const repository = try GitRepository.setup(allocator, options);
+    defer repository.close(allocator);
 
-    try out.print("Initialized empty Git repository in {s}\n", .{repository.name() orelse "unknown"});
+    try out.print("Initialized empty Git repository in {s}\n", .{repository.repo.name() orelse "unknown"});
 }

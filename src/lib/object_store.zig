@@ -10,10 +10,12 @@ const FileObjectStore = @import("storage/FileObjectStore.zig");
 pub const ObjectStore = union(enum) {
     file: FileObjectStore,
 
+    const Self = @This();
+
     /// Sets up all the initial structures needed for an object store.
     /// This is supposed to be performed on first use of a new object store,
     /// but can be done again to recover corrupted structures.
-    pub fn setup(self: *ObjectStore) !void {
+    pub fn setup(self: *Self) !void {
         switch (self.*) {
             inline else => |*s| try s.*.setup(),
         }
@@ -21,29 +23,19 @@ pub const ObjectStore = union(enum) {
 
     /// Returns the raw content of an object in the store.
     /// Returned memory is owned by the caller.
-    pub fn read(self: *const ObjectStore, allocator: Allocator, name: []const u8) ![]u8 {
+    pub fn read(self: *const Self, allocator: Allocator, name: []const u8) ![]u8 {
         switch (self.*) {
             inline else => |*s| return s.*.read(allocator, name),
         }
     }
 
     /// Writes the raw content of an object to the store.
-    pub fn write(self: *const ObjectStore, allocator: Allocator, name: []const u8, bytes: []u8) !void {
+    pub fn write(self: *const Self, allocator: Allocator, name: []const u8, bytes: []u8) !void {
         switch (self.*) {
             inline else => |*s| try s.*.write(allocator, name, bytes),
         }
     }
 };
-
-fn createFileObjectStore(allocator: Allocator, git_dir_path: []u8) !*ObjectStore {
-    const store = try allocator.create(ObjectStore);
-    errdefer allocator.destroy(store);
-
-    store.file = .{};
-    try store.file.init(allocator, git_dir_path);
-
-    return store;
-}
 
 test "test object store" {
     const allocator = std.testing.allocator;
@@ -54,11 +46,10 @@ test "test object store" {
     const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
     defer allocator.free(test_dir_path);
 
-    const store = try createFileObjectStore(allocator, test_dir_path);
-    defer {
-        store.file.deinit(allocator);
-        allocator.destroy(store);
-    }
+    var store: ObjectStore = .{ .file = .{} };
+
+    try store.file.init(allocator, test_dir_path);
+    defer store.file.deinit(allocator);
 
     try store.setup();
 

@@ -5,7 +5,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.fs.cwd;
 
-const helpers = @import("../helpers.zig");
+const hash = @import("../helpers.zig").hash;
 const index = @import("../index.zig");
 
 const env = @import("env.zig");
@@ -18,8 +18,8 @@ const REFS_TAGS_DIR_NAME = "refs/tags";
 const INDEX_FILE_NAME = "index";
 const HEAD_FILE_NAME = "HEAD";
 
-pub const FileRepositorySha1 = FileRepository(helpers.hash.Sha1);
-pub const FileRepositorySha256 = FileRepository(helpers.hash.Sha256);
+pub const FileRepositorySha1 = FileRepository(hash.Sha1);
+pub const FileRepositorySha256 = FileRepository(hash.Sha256);
 
 /// Returns a repository implementation that uses the file-system
 /// with the Git rules and uses the specified hasher function.

@@ -5,13 +5,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const index = @import("index.zig");
-const helpers = @import("helpers.zig");
+const hash = @import("helpers.zig").hash;
 const file_repository = @import("storage/file_repository.zig");
 
 const ObjectStore = @import("object_store.zig").ObjectStore;
 
-pub const RepositorySha1 = Repository(helpers.hash.Sha1);
-pub const RepositorySha256 = Repository(helpers.hash.Sha256);
+pub const RepositorySha1 = Repository(hash.Sha1);
+pub const RepositorySha256 = Repository(hash.Sha256);
 
 /// Returns an interface for a repository that uses the specified hasher function.
 pub fn Repository(comptime Hasher: type) type {
@@ -19,6 +19,7 @@ pub fn Repository(comptime Hasher: type) type {
         file: FileRepository,
 
         const Self = @This();
+
         pub const Index = index.Index(Hasher);
         pub const FileRepository = file_repository.FileRepository(Hasher);
 

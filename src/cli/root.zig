@@ -7,6 +7,7 @@ const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
 const Repository = zit.Repository;
+const GitRepository = zit.storage.GitRepositorySha1;
 
 const help = @import("help.zig").command;
 const cat_file = @import("cat-file.zig").command;
@@ -18,7 +19,7 @@ const version = @import("version.zig").command;
 
 /// The interface for a command.
 pub const Command = struct {
-    run: *const fn (allocator: Allocator, repository: ?*Repository, args: []const []const u8) anyerror!void,
+    run: *const fn (allocator: Allocator, repository: ?Repository, args: []const []const u8) anyerror!void,
     name: []const u8,
     description: []const u8,
     usage_text: ?[]const u8,
@@ -43,10 +44,8 @@ pub fn run(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
 
     for (commands) |cmd| {
         if (std.mem.eql(u8, cmd.name, name)) {
-            var repository: ?*Repository = null;
-
             if (cmd.require_repository) {
-                repository = zit.storage.openGitRepository(allocator, null) catch |err| switch (err) {
+                const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
                     error.GitDirNotFound => {
                         try out.print(
                             "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -56,14 +55,11 @@ pub fn run(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
                     },
                     else => return err,
                 };
-            }
+                defer repository.close(allocator);
 
-            try cmd.run(allocator, repository, args);
-
-            defer {
-                if (repository) |repo| {
-                    zit.storage.closeGitRepository(allocator, repo);
-                }
+                try cmd.run(allocator, repository.repo, args);
+            } else {
+                try cmd.run(allocator, null, args);
             }
 
             return;
