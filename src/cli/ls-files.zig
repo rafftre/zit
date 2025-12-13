@@ -6,14 +6,13 @@ const zit = @import("zit");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
-const Repository = zit.Repository;
+const GitRepository = zit.storage.GitRepositorySha1;
 
 const cli = @import("root.zig");
 
 /// The ls-files command.
 pub const command = cli.Command{
     .run = run,
-    .require_repository = true,
     .name = "ls-files",
     .description = "Show information about files in the index and the working tree",
     .usage_text = std.fmt.comptimePrint(
@@ -75,7 +74,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var show_cached = false;
@@ -123,14 +122,26 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         show_stage_info = true;
     }
 
-    // default to cached when other flags are missing
+    // defaults to cached when other flags are missing
     if (!show_cached and !show_others and !show_stage_info and
         !show_deleted and !show_modified and !show_unmerged and !show_killed)
     {
         show_cached = true;
     }
 
-    const files = try zit.listCached(allocator, repository.?);
+    const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+        error.GitDirNotFound => {
+            try out.print(
+                "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                .{},
+            );
+            return;
+        },
+        else => return err,
+    };
+    defer repository.close(allocator);
+
+    const files = try zit.listCached(allocator, repository.repo);
     defer {
         for (files.items) |f| {
             allocator.free(f.path);
@@ -153,14 +164,3 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         try if (zero_terminated) out.print("\x00", .{}) else out.print("\n", .{});
     }
 }
-
-// fn showUntrakedFiles(allocator: Allocator, repository: anytype, show_others: bool, show_killed: bool) !void {
-//     var files = undefined;
-
-//     files = if (show_others) {
-//         try zit.listOthers(allocator, repository);
-//     } else{
-//         try zit.listOthers(allocator, repository);
-//     };
-
-// }

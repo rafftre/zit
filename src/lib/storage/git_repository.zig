@@ -5,11 +5,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const cwd = std.fs.cwd;
 
-const hash = @import("../helpers.zig").hash;
-const index = @import("../index.zig");
-
 const env = @import("env.zig");
-const ObjectStore = @import("../object_store.zig").ObjectStore;
+const Sha1 = @import("../helpers.zig").hash.Sha1;
 
 const max_file_size = @import("../storage.zig").max_file_size;
 const DEFAULT_GIT_DIR_NAME = ".git";
@@ -18,30 +15,38 @@ const REFS_TAGS_DIR_NAME = "refs/tags";
 const INDEX_FILE_NAME = "index";
 const HEAD_FILE_NAME = "HEAD";
 
-pub const FileRepositorySha1 = FileRepository(hash.Sha1);
-pub const FileRepositorySha256 = FileRepository(hash.Sha256);
-
 /// Returns a repository implementation that uses the file-system
 /// with the Git rules and uses the specified hasher function.
-pub fn FileRepository(comptime Hasher: type) type {
+pub fn GitRepository(comptime Hasher: type) type {
     return struct {
         git_dir_path: []u8 = undefined,
         work_dir_path: ?[]u8 = null,
-        object_store: *ObjectStore = undefined,
 
         const Self = @This();
-        const hash_size = Hasher.hash_size;
-        pub const Index = index.Index(Hasher);
+        const Index = @import("../index.zig").Index(Hasher);
 
-        /// Initializes this struct.
+        /// Initializes this struct searching an existing .git directory.
+        /// Search the path of the .git directory from from `dir_name` or the current directory.
         /// Use `deinit` to free up used resources.
-        pub fn init(self: *Self, allocator: Allocator, dir_name: ?[]const u8, object_store: *ObjectStore) !void {
+        pub fn init(self: *Self, allocator: Allocator, dir_name: ?[]const u8) !void {
             const git_dir_path = try env.get(allocator, env.GIT_DIR) orelse try searchGitDirPath(allocator, dir_name);
             errdefer allocator.free(git_dir_path);
 
             std.log.debug("Using Git dir {s}", .{git_dir_path});
             self.git_dir_path = git_dir_path;
-            self.object_store = object_store;
+        }
+
+        /// Initializes this struct initializing a .git directory.
+        /// The path of the .git directory is resolved from `dir_name` or from the current directory.
+        /// If `bare`, the destination path will be used to host the repository directly
+        /// instead of using the .git directory.
+        /// Use `deinit` to free up used resources.
+        pub fn initForSetup(self: *Self, allocator: Allocator, dir_name: ?[]const u8, bare: bool) !void {
+            const git_dir_path = try resolveGitDirPathToCreate(allocator, dir_name, bare);
+            errdefer allocator.free(git_dir_path);
+
+            std.log.debug("Using Git dir {s}", .{git_dir_path});
+            self.git_dir_path = git_dir_path;
         }
 
         /// Frees up used resources.
@@ -82,11 +87,6 @@ pub fn FileRepository(comptime Hasher: type) type {
             return self.git_dir_path;
         }
 
-        /// Returns the object store used by the repository.
-        pub fn objectStore(self: *const Self) *ObjectStore {
-            return self.object_store;
-        }
-
         /// Returns the path of the worktree, if available.
         pub fn worktree(self: *const Self) ?[]const u8 {
             return self.work_dir_path;
@@ -120,13 +120,21 @@ pub fn FileRepository(comptime Hasher: type) type {
     };
 }
 
-// Resolves the destination path to create a new repository.
-// `start_path` is the directory from which the resolution starts.
+// Resolves the destination path of the .git directory to create a new repository.
+// The resolution starts from `name` or from the current directory when not specified.
+// The directory `name` will be created if not exists.
+// When `bare` is true uses the destination path as the .git directory.
 // Caller owns the returned memory.
-pub fn resolveDestDirToCreate(allocator: Allocator, start_path: []u8, bare: bool) ![]u8 {
-    if (bare) {
-        return try std.fs.realpathAlloc(allocator, start_path);
+fn resolveGitDirPathToCreate(allocator: Allocator, name: ?[]const u8, bare: bool) ![]u8 {
+    if (name) |n| {
+        try cwd().makePath(n);
     }
+
+    const start_path = try cwd().realpathAlloc(allocator, name orelse ".");
+    if (bare) {
+        return start_path;
+    }
+    defer allocator.free(start_path);
 
     const git_dir_path = try env.get(allocator, env.GIT_DIR);
     if (git_dir_path) |path| {
@@ -136,6 +144,8 @@ pub fn resolveDestDirToCreate(allocator: Allocator, start_path: []u8, bare: bool
 
     const dest_path = try std.fs.path.join(allocator, &.{ start_path, DEFAULT_GIT_DIR_NAME });
     defer allocator.free(dest_path);
+
+    try cwd().makePath(dest_path);
 
     return try std.fs.realpathAlloc(allocator, dest_path);
 }
@@ -212,6 +222,8 @@ fn getHomeDir(allocator: Allocator) ![]u8 {
     return try env.get(allocator, home_env) orelse allocator.dupe(u8, "");
 }
 
+const Sha1GitRepository = GitRepository(Sha1);
+
 test "repository setup" {
     const allocator = std.testing.allocator;
 
@@ -221,15 +233,12 @@ test "repository setup" {
     const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
     defer allocator.free(test_dir_path);
 
-    try tmp.dir.makeDir(DEFAULT_GIT_DIR_NAME);
-
-    const git_dir_path = try resolveDestDirToCreate(allocator, test_dir_path, false);
+    const git_dir_path = try resolveGitDirPathToCreate(allocator, test_dir_path, false);
     defer allocator.free(git_dir_path);
 
-    var repo: FileRepositorySha1 = .{};
-    var store: ObjectStore = .{ .file = .{} };
+    var repo: Sha1GitRepository = .{};
 
-    try repo.init(allocator, test_dir_path, &store);
+    try repo.init(allocator, test_dir_path);
     defer repo.deinit(allocator);
 
     try repo.setup("test");

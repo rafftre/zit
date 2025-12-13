@@ -4,14 +4,9 @@
 //! Package for the handling of the index file format.
 
 pub const Index = @import("index/index.zig").Index;
-pub const IndexSha1 = @import("index/index.zig").IndexSha1;
-pub const IndexSha256 = @import("index/index.zig").IndexSha256;
 
-pub const Entry = @import("index/index_entry.zig").Entry;
-pub const EntrySha1 = @import("index/index_entry.zig").EntrySha1;
-pub const EntrySha256 = @import("index/index_entry.zig").EntrySha256;
-pub const Flags = @import("index/index_entry.zig").Flags;
 pub const MergeStage = @import("index/index_entry.zig").MergeStage;
+pub const Flags = @import("index/index_entry.zig").Flags;
 pub const ExtendedFlags = @import("index/index_entry.zig").ExtendedFlags;
 
 pub const Extension = @import("index/index_extension.zig").Extension;

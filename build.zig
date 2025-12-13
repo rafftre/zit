@@ -6,7 +6,7 @@ const std = @import("std");
 // keep these properties in sync with build.zig.zon
 const app_name = "zit";
 const app_description = "Zit is a Git implementation written in Zig.";
-const app_version = "0.3.0";
+const app_version = "0.4.0";
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});

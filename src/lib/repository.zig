@@ -5,23 +5,17 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const index = @import("index.zig");
-const hash = @import("helpers.zig").hash;
-const file_repository = @import("storage/file_repository.zig");
-
-const ObjectStore = @import("object_store.zig").ObjectStore;
-
-pub const RepositorySha1 = Repository(hash.Sha1);
-pub const RepositorySha256 = Repository(hash.Sha256);
+const GitRepository = @import("storage/git_repository.zig").GitRepository;
 
 /// Returns an interface for a repository that uses the specified hasher function.
 pub fn Repository(comptime Hasher: type) type {
     return union(enum) {
-        file: FileRepository,
+        git: Git,
 
         const Self = @This();
 
         pub const Index = index.Index(Hasher);
-        pub const FileRepository = file_repository.FileRepository(Hasher);
+        pub const Git = GitRepository(Hasher);
 
         /// Sets up all the initial structures needed for a repository.
         /// This is supposed to be performed on first use of a new repository,
@@ -44,13 +38,6 @@ pub fn Repository(comptime Hasher: type) type {
         pub fn name(self: *const Self) ?[]const u8 {
             switch (self.*) {
                 inline else => |*s| return s.*.name(),
-            }
-        }
-
-        /// Returns the object store used by the repository.
-        pub fn objectStore(self: *const Self) *ObjectStore {
-            switch (self.*) {
-                inline else => |*s| return s.*.objectStore(),
             }
         }
 

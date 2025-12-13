@@ -6,14 +6,13 @@ const zit = @import("zit");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
-const Repository = zit.Repository;
+const GitRepository = zit.storage.GitRepositorySha1;
 
 const cli = @import("root.zig");
 
 /// The hash-object command.
 pub const command = cli.Command{
     .run = run,
-    .require_repository = true,
     .name = "hash-object",
     .description = "Compute object ID and optionally writes to the database.",
     .usage_text = std.fmt.comptimePrint(
@@ -52,7 +51,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var type_str: []const u8 = "blob";
@@ -88,10 +87,22 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         }
     }
 
+    const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+        error.GitDirNotFound => {
+            try out.print(
+                "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                .{},
+            );
+            return;
+        },
+        else => return err,
+    };
+    defer repository.close(allocator);
+
     if (use_stdin) {
         const in = std.io.getStdIn().reader();
 
-        const oid = try zit.hashObject(allocator, repository.?.objectStore(), in, type_str, !literally, persist);
+        const oid = try zit.hashObject(allocator, repository.store, in, type_str, !literally, persist);
         defer allocator.free(oid);
 
         try out.print("{s}\n", .{oid});
@@ -104,7 +115,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         };
         defer file.close();
 
-        const oid = try zit.hashObject(allocator, repository.?.objectStore(), file.reader(), type_str, true, persist);
+        const oid = try zit.hashObject(allocator, repository.store, file.reader(), type_str, true, persist);
         defer allocator.free(oid);
 
         try out.print("{s}\n", .{oid});

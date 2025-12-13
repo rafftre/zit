@@ -4,13 +4,15 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const FileObjectStore = @import("storage/FileObjectStore.zig");
+const GitObjectStore = @import("storage/GitObjectStore.zig");
 
 /// The interface for an object store.
 pub const ObjectStore = union(enum) {
-    file: FileObjectStore,
+    git: Git,
 
     const Self = @This();
+
+    pub const Git = GitObjectStore;
 
     /// Sets up all the initial structures needed for an object store.
     /// This is supposed to be performed on first use of a new object store,
@@ -46,10 +48,10 @@ test "test object store" {
     const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
     defer allocator.free(test_dir_path);
 
-    var store: ObjectStore = .{ .file = .{} };
+    var store: ObjectStore = .{ .git = .{} };
 
-    try store.file.init(allocator, test_dir_path);
-    defer store.file.deinit(allocator);
+    try store.git.init(allocator, test_dir_path);
+    defer store.git.deinit(allocator);
 
     try store.setup();
 

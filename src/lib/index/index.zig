@@ -5,16 +5,15 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const helpers = @import("../helpers.zig");
+const Sha1 = helpers.hash.Sha1;
 
-const index_entry = @import("index_entry.zig");
+const Flags = @import("index_entry.zig").Flags;
+const IndexEntry = @import("index_entry.zig").Entry;
 const IndexExtension = @import("index_extension.zig").Extension;
 const SparseDirectory = @import("SparseDirectory.zig");
 
 const header_size = 12;
 const INDEX_SIGNATURE: u32 = std.mem.readInt(u32, "DIRC", .big);
-
-pub const IndexSha1 = Index(helpers.hash.Sha1);
-pub const IndexSha256 = Index(helpers.hash.Sha256);
 
 /// Returns an index that uses the specified hasher function.
 /// See [gitformat-index](https://github.com/git/git/blob/master/Documentation/gitformat-index.adoc).
@@ -22,7 +21,9 @@ pub fn Index(comptime Hasher: type) type {
     return struct {
         const Self = @This();
         const hash_size = Hasher.hash_size;
-        pub const Entry = index_entry.Entry(Hasher.hash_size);
+
+        /// An index entry with the hash size (in bytes) of the provided hasher function.
+        pub const Entry = IndexEntry(Hasher.hash_size);
 
         // bit layout:
         //  0                   1                   2                   3
@@ -211,6 +212,8 @@ pub fn Index(comptime Hasher: type) type {
     };
 }
 
+const IndexSha1 = Index(Sha1);
+
 test "index" {
     const allocator = std.testing.allocator;
 
@@ -277,7 +280,7 @@ test "index" {
             0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc,
             0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
         },
-        .flags = index_entry.Flags{ .assume_valid = true, .name_length = 8 },
+        .flags = Flags{ .assume_valid = true, .name_length = 8 },
         .path = try allocator.dupeZ(u8, "test.txt"),
     });
 

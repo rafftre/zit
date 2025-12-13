@@ -6,7 +6,6 @@ const zit = @import("zit");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
-const Repository = zit.Repository;
 
 const cli = @import("root.zig");
 
@@ -22,7 +21,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(_: Allocator, _: ?Repository, args: []const []const u8) !void {
+fn run(_: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     if (args.len == 0) {

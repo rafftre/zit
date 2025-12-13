@@ -6,14 +6,13 @@ const zit = @import("zit");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
-const Repository = zit.Repository;
+const GitRepository = zit.storage.GitRepositorySha1;
 
 const cli = @import("root.zig");
 
 /// The inflate command.
 pub const command = cli.Command{
     .run = run,
-    .require_repository = true,
     .name = "inflate",
     .description = "Decompresses an object in the repository",
     .usage_text = std.fmt.comptimePrint(
@@ -34,7 +33,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var positional_args = std.ArrayList([]const u8).init(allocator);
@@ -55,7 +54,19 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
     if (positional_args.items.len > 0) {
         const hex = positional_args.items[0];
 
-        const encoded_data = try zit.readEncodedData(allocator, repository.?.objectStore(), hex);
+        const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+            error.GitDirNotFound => {
+                try out.print(
+                    "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                    .{},
+                );
+                return;
+            },
+            else => return err,
+        };
+        defer repository.close(allocator);
+
+        const encoded_data = try zit.readEncodedData(allocator, repository.store, hex);
         defer allocator.free(encoded_data);
 
         try out.print("{s}", .{encoded_data});

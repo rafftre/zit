@@ -6,7 +6,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const IndexSha1 = @import("index.zig").IndexSha1;
 const MergeStage = @import("index.zig").MergeStage;
 const ObjectId = @import("model.zig").ObjectId;
 const FileMode = @import("helpers.zig").file.Mode;
@@ -188,7 +187,7 @@ pub fn listKilled(allocator: Allocator, repository: anytype) !std.ArrayList(File
 inline fn appendTrackedFile(
     allocator: Allocator,
     list: *std.ArrayList(File),
-    entry: IndexSha1.Entry,
+    entry: anytype,
 ) !void {
     const file = try list.addOne();
 

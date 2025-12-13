@@ -71,31 +71,36 @@ The implementation of the CLI commands may be used as reference for usage of API
 
 ### APIs
 The entry point is [lib.zig](./src/lib.zig).
-- `storage.openGitRepository(allocator, name) !Repository`
-  Opens a repository existing on the file-system, searching it from the directory `name`.
-- `storage.createGitRepository(allocator, options) !Repository`
-  Creates an empty repository or reinitializes an existing one.
-  The repository will be created on the file-system
-  in the directory `options.name` (or in the current directory when not specified)
-  and with an in initial branch named `options.initial_branch` (or `main` when not specified).
+
+Repository operations:
+- `storage.GitRepository.open(allocator, dir_name) !GitRepository`
+  Opens an existing Git repository, searching it from the directory `dir_name` or from the current one.
+- `storage.GitRepository.setup(allocator, options) !GitRepository`
+  Creates an empty Git repository - or reinitializes an existing one - in the directory `options.name` or in the current one. The initial branch will be named as `options.initial_branch` or `main`.
+- `storage.GitRepository.close(allocator) void`
+  Close the Git repository and frees referenced resources.
+
+Commands:
 - `hashObject(allocator, object_store, reader, type_str, check_format, persist) ![]const u8`
-  Computes the object's identifier name and - if `persist` is `true` - writes it to the object store.
-  `type_str` is the type of the object, returns an error if it is not a valid type.
-  When `check_format` is `true`, it checks that the content passes the standard object parsing.
-  If `persist` is `true` writes to the object store.
+  Computes the object's identifier name and optionally writes it to the object store.
 - `readObject(allocator, object_store, name, expected_type) !Object`
   Reads the object content identified by `name` in the object store.
-  When `expected_type` is specified, the type read must match it, otherwise an error will be returned.
 - `readTypeAndSize(allocator, object_store, name, allow_unknown_type) !struct{ obj_type, obj_size }`
   Reads the type and the size of the object identified by `name` in the object store.
-  If `allow_unknown_type` is `true`, no error will be raised for an unknown type.
 - `readEncodedData(allocator, object_store, name) ![]u8`
-  Reads the encoded content - i.e. header (type name, space, and length) and
-  serialized data - of the object identified by `name` in the object store.
-- `listFiles(allocator, repository, opts) !std.ArrayList(File)`
-  Retrieves a list of files in the index and working directory.
-  The returned list is a combination of files built according to the specified options.
-  For this reason, a file may be reported multiple times.
+  Reads the encoded content (header+data) of the object identified by `name` in the object store.
+- `listCached(allocator, repository) !std.ArrayList(File)`
+  Retrieves the list of all tracked files (cached in the index).
+- `listModified(allocator, repository) !std.ArrayList(File)`
+  Retrieves the list of all files with an unstaged modification (including deletion).
+- `listDeleted(allocator, repository) !std.ArrayList(File)`
+  Retrieves the list of all files with an unstaged deletion.
+- `listUnmerged(allocator, repository) !std.ArrayList(File)`
+  Retrieves the list of unmerged files only, without including other tracked files.
+- `listOthers(allocator, repository) !std.ArrayList(File)`
+  Retrieves the list of all untracked files (other than those cached in the index).
+- `listKilled(allocator, repository) !std.ArrayList(File)`
+  Retrieves the list of all untracked files conflicting with tracked ones.
 
 
 ## Development

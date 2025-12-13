@@ -6,14 +6,13 @@ const zit = @import("zit");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
-const Repository = zit.Repository;
+const GitRepository = zit.storage.GitRepositorySha1;
 
 const cli = @import("root.zig");
 
 /// The cat-file command.
 pub const command = cli.Command{
     .run = run,
-    .require_repository = true,
     .name = "cat-file",
     .description = "Provide contents or type and size information for objects",
     .usage_text = std.fmt.comptimePrint(
@@ -52,7 +51,7 @@ pub const command = cli.Command{
     , .{ build_options.app_name, build_options.app_name, build_options.app_name }),
 };
 
-fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var allow_unknown_type = false;
@@ -86,6 +85,18 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
         }
     }
 
+    const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+        error.GitDirNotFound => {
+            try out.print(
+                "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                .{},
+            );
+            return;
+        },
+        else => return err,
+    };
+    defer repository.close(allocator);
+
     if (positional_args.items.len > 1) {
         const expected_type = positional_args.items[0];
         const obj_name = positional_args.items[1];
@@ -95,7 +106,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
             return;
         }
 
-        var obj = try zit.readObject(allocator, repository.?.objectStore(), obj_name, expected_type);
+        var obj = try zit.readObject(allocator, repository.store, obj_name, expected_type);
         defer obj.deinit(allocator);
 
         const bytes = try obj.serialize(allocator);
@@ -116,7 +127,7 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
                 return;
             }
 
-            var obj = zit.readObject(allocator, repository.?.objectStore(), obj_name, null) catch |err| switch (err) {
+            var obj = zit.readObject(allocator, repository.store, obj_name, null) catch |err| switch (err) {
                 error.FileNotFound => cli.fail(),
                 else => return err,
             };
@@ -127,12 +138,12 @@ fn run(allocator: Allocator, repository: ?Repository, args: []const []const u8) 
                 return;
             }
 
-            var obj = try zit.readObject(allocator, repository.?.objectStore(), obj_name, null);
+            var obj = try zit.readObject(allocator, repository.store, obj_name, null);
             defer obj.deinit(allocator);
 
             try out.print("{any}", .{obj});
         } else if (get_size or get_type) {
-            const type_size = try zit.readTypeAndSize(allocator, repository.?.objectStore(), obj_name, allow_unknown_type);
+            const type_size = try zit.readTypeAndSize(allocator, repository.store, obj_name, allow_unknown_type);
             if (get_size) {
                 try out.print("{d}\n", .{type_size.obj_size});
             } else {

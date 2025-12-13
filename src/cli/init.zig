@@ -6,15 +6,14 @@ const zit = @import("zit");
 const build_options = @import("build_options");
 
 const Allocator = std.mem.Allocator;
-const Repository = zit.Repository;
 const GitRepository = zit.storage.GitRepositorySha1;
+const SetupOptions = zit.storage.SetupOptions;
 
 const cli = @import("root.zig");
 
 /// The init command.
 pub const command = cli.Command{
     .run = run,
-    .require_repository = false,
     .name = "init",
     .description = "Create an empty repository or reinitialize an existing one",
     .usage_text = std.fmt.comptimePrint(
@@ -51,7 +50,7 @@ pub const command = cli.Command{
     , .{build_options.app_name}),
 };
 
-fn run(allocator: Allocator, _: ?Repository, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
     var is_bare = false;
@@ -88,7 +87,7 @@ fn run(allocator: Allocator, _: ?Repository, args: []const []const u8) !void {
         }
     }
 
-    var options: zit.storage.SetupOptions = .{
+    var options: SetupOptions = .{
         .bare = is_bare,
         .name = if (positional_args.items.len > 0) positional_args.items[0] else null,
     };

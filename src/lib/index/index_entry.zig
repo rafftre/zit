@@ -6,9 +6,7 @@ const Allocator = std.mem.Allocator;
 
 const helpers = @import("../helpers.zig");
 const FileMode = helpers.file.Mode;
-
-pub const EntrySha1 = Entry(helpers.hash.Sha1.hash_size);
-pub const EntrySha256 = Entry(helpers.hash.Sha256.hash_size);
+const Sha1 = helpers.hash.Sha1;
 
 /// Returns an index entry with the specified hash size in bytes.
 pub fn Entry(comptime hash_size: usize) type {
@@ -244,6 +242,8 @@ inline fn calcPaddingLen(version: u32, entry_len: usize) usize {
     }
     return 0;
 }
+
+const EntrySha1 = Entry(Sha1.hash_size);
 
 test "entry" {
     const allocator = std.testing.allocator;
