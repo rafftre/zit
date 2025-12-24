@@ -11,7 +11,7 @@ SPDX-License-Identifier: MPL-2.0
 
 This application consists of two parts:
 1. A CLI (Command-Line Interface) - directly executable and designed to partially mimic the behavior of Git.
-2. A library module - usable as a dependency in other Zig projects that need to work on a Git repository.
+2. A library module - usable as a dependency in other projects that need to work on a Git repository.
 
 
 ## Purpose
@@ -21,6 +21,20 @@ along with everything strictly necessary for profitable use from the command lin
 or within an application (if used as a library).
 There are no plans to implement a full Git clone.
 The ideal use case would be to use it as a base kit for creating a higher-level SCM-based tool.
+
+
+## Status and Roadmap
+
+| Status | Step                                    |
+|:------:|-----------------------------------------|
+|   ⚠️   | Bootstrap and history building          |
+|   ❌   | Branching and naming                    |
+|   ❌   | Remotes and transfer protocols          |
+|   ❌   | Storage formats (pack files)            |
+|   ❌   | Basic configuration                     |
+|   ⚠️   | Multi-hash support                      |
+|   ❓   | Other features (worktrees, notes...)    |
+|   ❓   | Custom features (history analysis, etc) |
 
 
 ## CLI Usage
@@ -128,15 +142,17 @@ Open a browser at [localhost:5000](http://localhost:5000/) to read the generated
 ### Architecture
 The code is structured into layers, with the higher levels depending on the lower ones.
 Each level corresponds to a Zig package with the following structure (from highest to lowest).
-- Entry-points:
-  - `cli` — CLI commands.
-  - `lib.zig` — library access interface.
+- Core Objects:
+  - `lib/model.zig` — Commonly data structures.
+- Core logic:
+  - `lib/*.zig` — Implementation of commands and rules.
 - Adapters and infrastructure:
-  - `lib/index` — Handling of the Git index file format.
-  - `lib/storage` — Management of repositories and object databases.
-- `lib` — Git logic and rules.
-- `lib/model` — Git core objects, commonly data structures.
-- `lib/helpers` — Helpers and common code used throughout the application.
+  - `lib/index.zig` — Handling of the Git index file format.
+  - `lib/helpers.zig` — Helpers and common code used throughout the application.
+  - `lib/storage.zig` — Management of Git repositories and object databases.
+- Entry-points:
+  - `cli/*.zig` — CLI commands.
+  - `lib.zig` — library access interface.
 
 ### Limitations
 - Object names must be used in full length, i.e. 40 characters hash are needed to identify objects.
