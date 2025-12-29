@@ -77,13 +77,7 @@ pub const command = cli.Command{
 fn run(allocator: Allocator, args: []const []const u8) !void {
     const out = std.io.getStdOut().writer();
 
-    var show_cached = false;
-    var show_others = false;
-    var show_stage_info = false;
-    var show_deleted = false;
-    var show_modified = false;
-    var show_unmerged = false;
-    var show_killed = false;
+    var opts: zit.ListFilesOptions = .{};
     var zero_terminated = false;
 
     var positional_args = std.ArrayList([]const u8).init(allocator);
@@ -94,19 +88,19 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
         const arg = args[i];
 
         if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--cached")) {
-            show_cached = true;
+            opts.cached = true;
         } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--others")) {
-            show_others = true;
+            opts.others = true;
         } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--stage")) {
-            show_stage_info = true;
+            opts.stage_info = true;
         } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--deleted")) {
-            show_deleted = true;
+            opts.deleted = true;
         } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--modified")) {
-            show_modified = true;
+            opts.modified = true;
         } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--unmerged")) {
-            show_unmerged = true;
+            opts.unmerged = true;
         } else if (std.mem.eql(u8, arg, "-k") or std.mem.eql(u8, arg, "--killed")) {
-            show_killed = true;
+            opts.killed = true;
         } else if (std.mem.eql(u8, arg, "-z")) {
             zero_terminated = true;
         } else if (arg.len > 0 and arg[0] == '-') {
@@ -115,18 +109,6 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
         } else {
             try positional_args.append(arg);
         }
-    }
-
-    // forces stage info when unmerged files are requested
-    if (show_unmerged) {
-        show_stage_info = true;
-    }
-
-    // defaults to cached when other flags are missing
-    if (!show_cached and !show_others and !show_stage_info and
-        !show_deleted and !show_modified and !show_unmerged and !show_killed)
-    {
-        show_cached = true;
     }
 
     const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
@@ -141,7 +123,7 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
     };
     defer repository.close(allocator);
 
-    const files = try zit.listCached(allocator, repository.repo);
+    const files = try zit.listFiles(allocator, repository.repo, &opts);
     defer {
         for (files.items) |f| {
             allocator.free(f.path);
@@ -150,7 +132,7 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
     }
 
     for (files.items) |file| {
-        if (show_stage_info and file.merge_stage != null) {
+        if (opts.stage_info and file.merge_stage != null) {
             try out.print("{any} {any} {d}\t{s}", .{
                 file.mode,
                 file.object_id,

@@ -87,34 +87,24 @@ The implementation of the CLI commands may be used as reference for usage of API
 The entry point is [lib.zig](./src/lib.zig).
 
 Repository operations:
-- `storage.GitRepository.open(allocator, dir_name) !GitRepository`
+- `storage.GitRepository.open(std.mem.Allocator, ?[]const u8) !storage.GitRepository`
   Opens an existing Git repository, searching it from the directory `dir_name` or from the current one.
-- `storage.GitRepository.setup(allocator, options) !GitRepository`
+- `storage.GitRepository.setup(std.mem.Allocator, storage.SetupOptions) !storage.GitRepository`
   Creates an empty Git repository - or reinitializes an existing one - in the directory `options.name` or in the current one. The initial branch will be named as `options.initial_branch` or `main`.
-- `storage.GitRepository.close(allocator) void`
+- `storage.GitRepository.close(std.mem.Allocator) void`
   Close the Git repository and frees referenced resources.
 
 Commands:
-- `hashObject(allocator, object_store, reader, type_str, check_format, persist) ![]const u8`
+- `hashObject(std.mem.Allocator, ObjectStore, std.io.GenericReader, []const u8, bool, bool) ![]const u8`
   Computes the object's identifier name and optionally writes it to the object store.
-- `readObject(allocator, object_store, name, expected_type) !Object`
+- `readObject(std.mem.Allocator, ObjectStore, []const u8, ?[]const u8) !model.Object`
   Reads the object content identified by `name` in the object store.
-- `readTypeAndSize(allocator, object_store, name, allow_unknown_type) !struct{ obj_type, obj_size }`
+- `readTypeAndSize(std.mem.Allocator, ObjectStore, []const u8, bool) !struct{ []const u8, usize }`
   Reads the type and the size of the object identified by `name` in the object store.
-- `readEncodedData(allocator, object_store, name) ![]u8`
+- `readEncodedData(std.mem.Allocator, ObjectStore, []const u8) ![]u8`
   Reads the encoded content (header+data) of the object identified by `name` in the object store.
-- `listCached(allocator, repository) !std.ArrayList(File)`
-  Retrieves the list of all tracked files (cached in the index).
-- `listModified(allocator, repository) !std.ArrayList(File)`
-  Retrieves the list of all files with an unstaged modification (including deletion).
-- `listDeleted(allocator, repository) !std.ArrayList(File)`
-  Retrieves the list of all files with an unstaged deletion.
-- `listUnmerged(allocator, repository) !std.ArrayList(File)`
-  Retrieves the list of unmerged files only, without including other tracked files.
-- `listOthers(allocator, repository) !std.ArrayList(File)`
-  Retrieves the list of all untracked files (other than those cached in the index).
-- `listKilled(allocator, repository) !std.ArrayList(File)`
-  Retrieves the list of all untracked files conflicting with tracked ones.
+- `listFiles(std.mem.Allocator, Repository, ListFilesOptions) !std.ArrayList(File)`
+  Retrieves a list of files in the index and in the working directory.
 
 
 ## Development

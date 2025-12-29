@@ -14,21 +14,16 @@ pub const LooseObject = @import("lib/LooseObject.zig");
 pub const ObjectStore = @import("lib/object_store.zig").ObjectStore;
 pub const Repository = @import("lib/repository.zig").Repository;
 
-pub const hashObject = @import("lib/object-write.zig").hashObject;
+const objects = @import("lib/objects.zig");
+pub const hashObject = objects.hashObject;
+pub const readObject = objects.readObject;
+pub const readTypeAndSize = objects.readTypeAndSize;
+pub const readEncodedData = objects.readEncodedData;
 
-const object_read = @import("lib/object-read.zig");
-pub const readObject = object_read.readObject;
-pub const readTypeAndSize = object_read.readTypeAndSize;
-pub const readEncodedData = object_read.readEncodedData;
-
-const cache = @import("lib/cache.zig");
-pub const listCached = cache.listCached;
-pub const listModified = cache.listModified;
-pub const listDeleted = cache.listDeleted;
-pub const listUnmerged = cache.listUnmerged;
-pub const listOthers = cache.listOthers;
-pub const listKilled = cache.listKilled;
-pub const File = cache.File;
+const files = @import("lib/files.zig");
+pub const File = files.File;
+pub const ListFilesOptions = files.ListFilesOptions;
+pub const listFiles = files.listFiles;
 
 test {
     @import("std").testing.refAllDecls(@This());
