@@ -3,89 +3,64 @@
 
 const std = @import("std");
 const zit = @import("zit");
-const build_options = @import("build_options");
+const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
 const GitRepository = zit.storage.GitRepositorySha1;
 
-const cli = @import("root.zig");
-
 /// The hash-object command.
-pub const command = cli.Command{
+pub const command = Command{
     .run = run,
     .name = "hash-object",
-    .description = "Compute object ID and optionally writes to the database.",
-    .usage_text = std.fmt.comptimePrint(
-        \\Usage:
-        \\  {s} hash-object [-t <type>] [-w] [--stdin [--literally]] <file>...
-        \\
-        \\Description:
-        \\  This command computes the object IDs for the contents of the named
-        \\  files (which can be outside of the working tree), and optionally writes
-        \\  the resulting objects into the database.
-        \\
-        \\  The object IDs are computed with the specified type, or as a "blob" when
-        \\  missing.
-        \\
-        \\  The file content can be entered directly from stdin instead of being
-        \\  read from a file.
-        \\
-        \\Options:
-        \\  <file>
-        \\    The file to read from (there may be multiple files).
-        \\
-        \\  --literally
-        \\    Allow --stdin to hash anything into a loose object which might not
-        \\    otherwise pass standard object parsing.
-        \\    Useful for stress-testing or reproducing corrupt or bogus objects.
-        \\
-        \\  --stdin
-        \\    Read the object from standard input instead of from a file.
-        \\
-        \\  -t <type>
-        \\    The type of the object (default: "blob").
-        \\
-        \\  -w
-        \\    Write the object into the database.
-        \\
-    , .{build_options.app_name}),
+    .brief = "Compute object ID and optionally writes to the database",
+    .description =
+    \\This command computes the object IDs for the contents of the named
+    \\files (which can be outside of the working tree), and optionally writes
+    \\the resulting objects into the database.
+    \\
+    \\The object IDs are computed with the specified type, or as a "blob" when
+    \\missing.
+    \\
+    \\The file content can be entered directly from stdin instead of being read
+    \\from a file.
+    ,
+    .usage_lines = "[-t <type>] [-w] [--stdin [--literally]] <file>...",
+    .parameters = &[_]Command.Parameter{
+        .{ .option = .{
+            .short = 't',
+            .description = "The type of the object (default: \"blob\").",
+            .require_value = true,
+        } },
+        .{ .option = .{
+            .short = 'w',
+            .description = "Write the object into the database.",
+        } },
+        .{ .option = .{
+            .long = "stdin",
+            .description = "Read the object from standard input instead of from a file.",
+        } },
+        .{ .option = .{
+            .long = "literally",
+            .description =
+            \\Allow --stdin to hash anything into a loose object which might not
+            \\otherwise pass standard object parsing.
+            \\Useful for stress-testing or reproducing corrupt or bogus objects.
+            ,
+        } },
+        .{ .positional = .{
+            .name = "file",
+            .description = "The file to read from (there may be multiple files).",
+        } },
+    },
 };
 
-fn run(allocator: Allocator, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: Command.Arguments) !void {
     const out = std.io.getStdOut().writer();
 
-    var type_str: []const u8 = "blob";
-    var persist = false;
-    var use_stdin = false;
-    var literally = false;
-
-    var positional_args = std.ArrayList([]const u8).init(allocator);
-    defer positional_args.deinit();
-
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-
-        if (std.mem.startsWith(u8, arg, "--stdin")) {
-            use_stdin = true;
-        } else if (std.mem.eql(u8, arg, "--literally")) {
-            literally = true;
-        } else if (std.mem.eql(u8, arg, "-t")) {
-            if (args.len <= (i + 1)) {
-                try out.print("Error: '-t' requires a value.\n", .{});
-                return;
-            }
-            i += 1;
-            type_str = args[i];
-        } else if (std.mem.eql(u8, arg, "-w")) {
-            persist = true;
-        } else if (arg.len > 0 and arg[0] == '-') {
-            try out.print("Error: Unknown flag '{s}' for '{s}' command\n", .{ arg, command.name });
-            return;
-        } else {
-            try positional_args.append(arg);
-        }
-    }
+    const type_str = args.parsed.get("t") orelse "blob";
+    const persist = args.parsed.get("w") != null;
+    const use_stdin = args.parsed.get("stdin") != null;
+    const literally = args.parsed.get("literally") != null;
 
     const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
         error.GitDirNotFound => {
@@ -108,7 +83,7 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
         try out.print("{s}\n", .{oid});
     }
 
-    for (positional_args.items) |path| {
+    for (args.positional.items) |path| {
         var file = std.fs.cwd().openFile(path, .{}) catch |err| {
             try std.io.getStdErr().writer().print("Failed to open file: {s}\n", .{@errorName(err)});
             continue;

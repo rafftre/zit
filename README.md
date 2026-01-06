@@ -156,7 +156,6 @@ Each level corresponds to a Zig package with the following structure (from highe
   (see `max_file_size` constant in [storage](./src/lib/storage.zig).
 - SHA-1 hashing is hardcoded in some components (ObjectId, object-read, object-write),
   ref: [hash-function-transition](https://git-scm.com/docs/hash-function-transition).
-- The command-line flags must be passed as separated arguments and cannot be combined (i.e. use "-a -b", not "-ab")
 - _Sparse directory_ is the only supported index extension.
 
 

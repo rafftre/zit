@@ -1,0 +1,320 @@
+// SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
+// SPDX-License-Identifier: MPL-2.0
+
+//! The interface for a command.
+
+const Command = @This();
+
+const std = @import("std");
+const build_options = @import("build_options");
+
+const Allocator = std.mem.Allocator;
+const usage_prefix = "  ";
+
+run: *const fn (allocator: Allocator, args: Arguments) anyerror!void,
+name: []const u8,
+brief: []const u8,
+description: []const u8,
+usage_lines: ?[]const u8 = null,
+parameters: ?[]const Parameter = null,
+
+/// Returns the Option with a short name matching `name` if present.
+pub fn getShortOption(self: *const Command, name: u8) ?Option {
+    if (self.parameters) |parameters| {
+        for (parameters) |param| {
+            switch (param) {
+                .option => |option| if (option.isShort(name)) return option,
+                else => {},
+            }
+        }
+    }
+
+    return null;
+}
+
+/// Returns the Option with a long name matching `name` if present.
+pub fn getLongOption(self: *const Command, name: []const u8) ?Option {
+    if (self.parameters) |parameters| {
+        for (parameters) |param| {
+            switch (param) {
+                .option => |option| if (option.isLong(name)) return option,
+                else => {},
+            }
+        }
+    }
+
+    return null;
+}
+
+/// Outputs to `writer` the help message for the command.
+/// Text will be prefixed with `indent` string.
+pub fn printUsage(self: *const Command, writer: anytype, app_name: []const u8) !void {
+    try writer.print("Usage:\n", .{});
+    if (self.usage_lines) |usage_lines| {
+        var it = std.mem.splitSequence(u8, usage_lines, "\n");
+        while (it.next()) |line| {
+            try writer.print("{s}{s} {s} {s}\n", .{ usage_prefix, app_name, self.name, line });
+        }
+    } else {
+        try writer.print("{s}{s} {s}\n", .{ usage_prefix, app_name, self.name });
+    }
+
+    try writer.print("\nDescription:\n", .{});
+    try printMultilineText(writer, usage_prefix, self.description);
+
+    if (self.parameters) |parameters| {
+        try writer.print("\nParameters:\n", .{});
+        for (parameters) |param| {
+            switch (param) {
+                .option => |option| {
+                    if (option.short) |short_name| {
+                        try writer.print("{s}-{c}\n", .{ usage_prefix, short_name });
+                    }
+                    if (option.long) |long_name| {
+                        try writer.print("{s}--{s}\n", .{ usage_prefix, long_name });
+                    }
+                    try printMultilineText(writer, usage_prefix ** 2, option.description);
+                },
+                .positional => |positional| {
+                    try writer.print("{s}<{s}>\n", .{ usage_prefix, positional.name });
+                    try printMultilineText(writer, usage_prefix ** 2, positional.description);
+                },
+            }
+            try writer.print("\n", .{});
+        }
+    } else {
+        // add another newline for Windows
+        try writer.print("\n", .{});
+    }
+}
+
+fn printMultilineText(writer: anytype, indent: []const u8, description: []const u8) !void {
+    var it = std.mem.splitSequence(u8, description, "\n");
+    while (it.next()) |line| {
+        try writer.print("{s}{s}\n", .{ indent, line });
+    }
+}
+
+/// A command parameter.
+pub const Parameter = union(enum) {
+    option: Option,
+    positional: Positional,
+};
+
+/// An option that optionally may require a value.
+/// An option can have a short name, a long name, or both.
+/// Options that have only the short name (i.e. flags) can be combined.
+pub const Option = struct {
+    short: ?u8 = undefined,
+    long: ?[]const u8 = undefined,
+    description: []const u8,
+    require_value: bool = false,
+
+    /// Checks if this option has a short name equal to `name`.
+    inline fn isShort(self: Option, name: u8) bool {
+        if (self.short) |opt_short| {
+            return opt_short == name;
+        }
+        return false;
+    }
+
+    /// Checks if this option has a long name equal to `name`.
+    inline fn isLong(self: Option, name: []const u8) bool {
+        if (self.long) |opt_long| {
+            return std.mem.startsWith(u8, name, opt_long);
+        }
+        return false;
+    }
+};
+
+/// A positional argument.
+pub const Positional = struct {
+    name: []const u8,
+    description: []const u8,
+};
+
+/// Actual arguments, i.e. parsed parameters.
+pub const Arguments = struct {
+    /// A map of parsed arguments that uses parameter names as keys.
+    ///
+    /// Options are stored with their string values.
+    ///
+    /// Flags, and options that does not require a value, are stored with
+    /// the value setted to the string "true".
+    ///
+    /// Long names are used as keys when available, otherwise short names.
+    parsed: std.StringArrayHashMap([]const u8),
+    /// Positional parameters, in the same order of the command line.
+    positional: std.ArrayList([]const u8),
+
+    /// Initializes this struct.
+    /// Free with `deinit`.
+    pub fn init(allocator: Allocator) Arguments {
+        return .{
+            .parsed = std.StringArrayHashMap([]const u8).init(allocator),
+            .positional = std.ArrayList([]const u8).init(allocator),
+        };
+    }
+
+    /// Frees referenced resources.
+    pub fn deinit(self: *Arguments, allocator: Allocator) void {
+        // Free all allocated keys
+        var it = self.parsed.iterator();
+        while (it.next()) |entry| {
+            allocator.free(entry.key_ptr.*);
+        }
+
+        self.parsed.deinit();
+        self.positional.deinit();
+    }
+
+    /// Parses command-line arguments according to command specification.
+    /// Outputs messages to writer.
+    pub fn parse(
+        self: *Arguments,
+        allocator: Allocator,
+        command: Command,
+        args: []const []const u8,
+        writer: anytype,
+    ) !void {
+        if (command.parameters) |_| {
+            var i: usize = 0;
+            while (i < args.len) : (i += 1) {
+                const arg = args[i];
+
+                // Check for long options
+                if (std.mem.startsWith(u8, arg, "--")) {
+                    const skip_next = try self.parseLongArg(allocator, command, args, i, writer);
+                    if (skip_next) {
+                        i += 1;
+                    }
+                }
+                // Check for short options
+                else if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
+                    const skip_next = try self.parseShortArgs(allocator, command, args, i, writer);
+                    if (skip_next) {
+                        i += 1;
+                    }
+                }
+                // Positional argument
+                else {
+                    try self.positional.append(arg);
+                }
+            }
+        }
+    }
+
+    // Parses a single long argument (--option, --option=value, or --option="spaced value")
+    // Returns `true` if args contains an isolated value that need to be skipped to continue parsing.
+    fn parseLongArg(
+        self: *Arguments,
+        allocator: Allocator,
+        command: Command,
+        args: []const []const u8,
+        i: usize,
+        writer: anytype,
+    ) !bool {
+        const arg = args[i];
+        std.log.debug("Parsing long argument '{s}'", .{arg});
+
+        const long_name = arg[2..];
+
+        if (command.getLongOption(long_name)) |option| {
+            const opt_long = option.long.?;
+
+            if (!option.require_value) {
+                try self.parsed.put(try allocator.dupe(u8, opt_long), "true");
+                return false;
+            }
+
+            if (long_name.len == opt_long.len) {
+                // --option format (value should be next arg)
+
+                if ((i + 1) >= args.len) {
+                    try writer.print("Error: '--{s}' requires a value.\n", .{opt_long});
+                    return error.MissingOptionValue;
+                }
+
+                const value = try stripQuotes(args[i + 1]);
+                try self.parsed.put(try allocator.dupe(u8, opt_long), value);
+
+                return true;
+            } else if (long_name.len > opt_long.len and long_name[opt_long.len] == '=') {
+                // --option=value format
+
+                const value = try stripQuotes(long_name[(opt_long.len + 1)..]);
+                try self.parsed.put(try allocator.dupe(u8, opt_long), value);
+
+                return false;
+            }
+        }
+
+        try writer.print("Error: Unknown option '{s}' for '{s}' command.\n", .{ arg, command.name });
+        return error.UnknownOption;
+    }
+
+    // Parses a list of short arguments (-x or -xyz)
+    // Returns `true` if args contains an isolated value that need to be skipped to continue parsing.
+    fn parseShortArgs(
+        self: *Arguments,
+        allocator: Allocator,
+        command: Command,
+        args: []const []const u8,
+        i: usize,
+        writer: anytype,
+    ) !bool {
+        const arg = args[i];
+        std.log.debug("Parsing short argument(s) '{s}'", .{arg});
+
+        var char_idx: usize = 1;
+        while (char_idx < arg.len) : (char_idx += 1) {
+            const flag_char = arg[char_idx];
+
+            if (command.getShortOption(flag_char)) |option| {
+                // Use long name as key if available, otherwise use short name
+                const key = if (option.long) |long_name| long_name else &[_]u8{option.short.?};
+
+                if (option.require_value) {
+                    if (char_idx != 1 or arg.len > 2) {
+                        // Option is combined with other flags, which is not allowed
+                        try writer.print(
+                            "Error: option '-{c}' requires a value and cannot be combined with other flags.\n",
+                            .{flag_char},
+                        );
+                        return error.OptionCannotBeCombined;
+                    }
+
+                    if ((i + 1) >= args.len) {
+                        try writer.print("Error: '-{c}' requires a value.\n", .{flag_char});
+                        return error.MissingOptionValue;
+                    }
+
+                    const value = try stripQuotes(args[i + 1]);
+                    try self.parsed.put(try allocator.dupe(u8, key), value);
+
+                    return true;
+                } else {
+                    try self.parsed.put(try allocator.dupe(u8, key), "true");
+                    continue;
+                }
+            }
+
+            try writer.print("Error: Unknown flag '-{c}' for '{s}' command.\n", .{ flag_char, command.name });
+            return error.UnknownFlag;
+        }
+
+        return false;
+    }
+};
+
+/// Strip surrounding quotes from a string if present.
+fn stripQuotes(s: []const u8) ![]const u8 {
+    if (s.len >= 2) {
+        if ((s[0] == '"' and s[s.len - 1] == '"') or
+            (s[0] == '\'' and s[s.len - 1] == '\''))
+        {
+            return s[1..(s.len - 1)];
+        }
+    }
+    return s;
+}

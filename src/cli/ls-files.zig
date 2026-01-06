@@ -3,113 +3,105 @@
 
 const std = @import("std");
 const zit = @import("zit");
-const build_options = @import("build_options");
+const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
 const GitRepository = zit.storage.GitRepositorySha1;
 
-const cli = @import("root.zig");
-
 /// The ls-files command.
-pub const command = cli.Command{
+pub const command = Command{
     .run = run,
     .name = "ls-files",
-    .description = "Show information about files in the index and the working tree",
-    .usage_text = std.fmt.comptimePrint(
-        \\Usage:
-        \\  {s} ls-files [-c|--cached] [-o|--others]
-        \\               [-d|--deleted] [-m|--modified]
-        \\               [-u|--unmerged] [-k|--killed]
-        \\               [-s|--stage] [-z]
-        \\
-        \\Description:
-        \\  This command merges the file listing in the index with the actual working directory list,
-        \\  and shows different combinations of the two.
-        \\
-        \\  Several flags can be used to determine which files are shown,
-        \\  and each file may be printed multiple times if there are multiple entries in the index
-        \\  or if multiple statuses are applicable for the relevant file selection options.
-        \\
-        \\  The output is a list of file names unless -s is used, in which case it is:
-        \\  [<tag> ]<mode> <object> <stage> <file>
-        \\
-        \\  Pathnames are reported literally. When using -z, they are terminated with a null byte.
-        \\
-        \\Options:
-        \\  -c
-        \\  --cached
-        \\    Show all files cached in the index, i.e. all tracked files.
-        \\    (This is the default if no -c/-o/-s/-d/-m/-u/-k options are specified.)
-        \\
-        \\  -o
-        \\  --others
-        \\    Show other (i.e. untracked) files in the output.
-        \\  
-        \\  -s
-        \\  --stage
-        \\    Show staged contents' mode bits, object name and stage number.
-        \\  
-        \\  -d
-        \\  --deleted
-        \\    Show files with an unstaged deletion.
-        \\  
-        \\  -m
-        \\  --modified
-        \\    Show files with an unstaged modification
-        \\    (Note that an unstaged deletion also counts as an unstaged modification.)
-        \\  
-        \\  -u
-        \\  --unmerged
-        \\    Show information about unmerged files,
-        \\    but do not show any other tracked files (forces --stage, overrides --cached).
-        \\  
-        \\  -k
-        \\  --killed
-        \\    Show untracked files on the filesystem that need to be removed due to
-        \\    conflicts for tracked files to be able to be written to the filesystem.
-        \\
-        \\  -z
-        \\    Terminate line with \0.
-        \\
-    , .{build_options.app_name}),
+    .brief = "Show information about files in the index and the working tree",
+    .description =
+    \\This command merges the file listing in the index with the actual working
+    \\directory list, and shows different combinations of the two.
+    \\
+    \\Several flags can be used to determine which files are shown, and each
+    \\file may be printed multiple times if there are multiple entries in the
+    \\index or if multiple statuses are applicable for the relevant file
+    \\selection options.
+    \\
+    \\The output is a list of file names unless -s is used, in which case it is:
+    \\[<tag> ]<mode> <object> <stage> <file>
+    \\
+    \\Pathnames are reported literally. When using -z, they are terminated with
+    \\a null byte.
+    ,
+    .usage_lines =
+    \\[-c|--cached] [-o|--others]
+    \\[-d|--deleted] [-m|--modified]
+    \\[-u|--unmerged] [-k|--killed]
+    \\[-s|--stage] [-z]
+    ,
+    .parameters = &[_]Command.Parameter{
+        .{ .option = .{
+            .short = 'c',
+            .long = "cached",
+            .description =
+            \\Show all files cached in the index, i.e. all tracked files.
+            \\(This is the default if no -c/-o/-s/-d/-m/-u/-k options are specified.)
+            ,
+        } },
+        .{ .option = .{
+            .short = 'o',
+            .long = "others",
+            .description = "Show other (i.e. untracked) files in the output.",
+        } },
+        .{ .option = .{
+            .short = 's',
+            .long = "stage",
+            .description = "Show staged contents' mode bits, object name and stage number.",
+        } },
+        .{ .option = .{
+            .short = 'd',
+            .long = "deleted",
+            .description = "Show files with an unstaged deletion.",
+        } },
+        .{ .option = .{
+            .short = 'm',
+            .long = "modified",
+            .description =
+            \\Show files with an unstaged modification.
+            \\Note that an unstaged deletion also counts as an unstaged modification.
+            ,
+        } },
+        .{ .option = .{
+            .short = 'u',
+            .long = "unmerged",
+            .description =
+            \\Show information about unmerged files, but do not show
+            \\any other tracked files (forces --stage, overrides --cached).
+            ,
+        } },
+        .{ .option = .{
+            .short = 'k',
+            .long = "killed",
+            .description =
+            \\Show untracked files on the filesystem that need to be removed due to
+            \\conflicts for tracked files to be able to be written to the filesystem.
+            ,
+        } },
+        .{ .option = .{
+            .short = 'z',
+            .description = "Terminate line with \\0.",
+        } },
+    },
 };
 
-fn run(allocator: Allocator, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: Command.Arguments) !void {
     const out = std.io.getStdOut().writer();
 
-    var opts: zit.ListFilesOptions = .{};
-    var zero_terminated = false;
-
-    var positional_args = std.ArrayList([]const u8).init(allocator);
-    defer positional_args.deinit();
-
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-
-        if (std.mem.eql(u8, arg, "-c") or std.mem.eql(u8, arg, "--cached")) {
-            opts.cached = true;
-        } else if (std.mem.eql(u8, arg, "-o") or std.mem.eql(u8, arg, "--others")) {
-            opts.others = true;
-        } else if (std.mem.eql(u8, arg, "-s") or std.mem.eql(u8, arg, "--stage")) {
-            opts.stage_info = true;
-        } else if (std.mem.eql(u8, arg, "-d") or std.mem.eql(u8, arg, "--deleted")) {
-            opts.deleted = true;
-        } else if (std.mem.eql(u8, arg, "-m") or std.mem.eql(u8, arg, "--modified")) {
-            opts.modified = true;
-        } else if (std.mem.eql(u8, arg, "-u") or std.mem.eql(u8, arg, "--unmerged")) {
-            opts.unmerged = true;
-        } else if (std.mem.eql(u8, arg, "-k") or std.mem.eql(u8, arg, "--killed")) {
-            opts.killed = true;
-        } else if (std.mem.eql(u8, arg, "-z")) {
-            zero_terminated = true;
-        } else if (arg.len > 0 and arg[0] == '-') {
-            try out.print("Error: Unknown flag '{s}' for '{s}' command.\n", .{ arg, command.name });
-            return;
-        } else {
-            try positional_args.append(arg);
-        }
-    }
+    var opts: zit.ListFilesOptions = .{
+        .cached = args.parsed.get("cached") != null,
+        .others = args.parsed.get("others") != null,
+        .stage_info = args.parsed.get("stage") != null,
+        .deleted = args.parsed.get("deleted") != null,
+        .modified = args.parsed.get("modified") != null,
+        .unmerged = args.parsed.get("unmerged") != null,
+        .killed = args.parsed.get("killed") != null,
+    };
+    const zero_terminated = args.parsed.get("z") != null;
 
     const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
         error.GitDirNotFound => {

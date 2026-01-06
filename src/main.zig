@@ -36,5 +36,5 @@ pub fn main() !void {
     const command_name = args[1];
     const command_args = args[2..];
 
-    try cli.run(gpa, command_name, command_args);
+    try cli.runCommand(gpa, command_name, command_args);
 }

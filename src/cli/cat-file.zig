@@ -3,87 +3,69 @@
 
 const std = @import("std");
 const zit = @import("zit");
-const build_options = @import("build_options");
+const cli = @import("root.zig");
+const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
 const GitRepository = zit.storage.GitRepositorySha1;
 
-const cli = @import("root.zig");
-
 /// The cat-file command.
-pub const command = cli.Command{
+pub const command = Command{
     .run = run,
     .name = "cat-file",
-    .description = "Provide contents or type and size information for objects",
-    .usage_text = std.fmt.comptimePrint(
-        \\Usage:
-        \\  {s} cat-file <type> <object>
-        \\  {s} cat-file (-e | -p) <object>
-        \\  {s} cat-file (-t | -s) [--allow-unknown-type] <object>
-        \\
-        \\Description:
-        \\  This command provides the content or type of an object in the repository.
-        \\  The type is required unless one of the flags is used.
-        \\
-        \\Options:
-        \\  <object>
-        \\    The name of the object to show.
-        \\
-        \\  <type>
-        \\    The expected type for object.
-        \\
-        \\  --allow-unknown-type
-        \\    Allow -s or -t to query broken/corrupt objects of unknown type.
-        \\
-        \\  -e
-        \\    Check if object exists. Exit with non-zero status and emits an error
-        \\    on stderr if object doesn't exists or is of an invalid format.
-        \\
-        \\  -p
-        \\    Pretty-print the contents of object.
-        \\
-        \\  -s
-        \\    Show the object size.
-        \\
-        \\  -t
-        \\    Show the object type.
-        \\
-    , .{ build_options.app_name, build_options.app_name, build_options.app_name }),
+    .brief = "Provide contents or type and size information for objects",
+    .description =
+    \\Provide contents or type and size information for an object in the
+    \\repository. The type is required unless one of the flags is used.
+    ,
+    .usage_lines =
+    \\<type> <object>
+    \\(-e | -p) <object>
+    \\(-t | -s) [--allow-unknown-type] <object>
+    ,
+    .parameters = &[_]Command.Parameter{
+        .{ .option = .{
+            .short = 'e',
+            .description =
+            \\Check if object exists. Exit with non-zero status and emits an
+            \\error on stderr if object doesn't exists or is of an invalid format.
+            ,
+        } },
+        .{ .option = .{
+            .short = 'p',
+            .description = "Pretty-print the contents of object.",
+        } },
+        .{ .option = .{
+            .short = 't',
+            .description = "Show the object type.",
+        } },
+        .{ .option = .{
+            .short = 's',
+            .description = "Show the object size.",
+        } },
+        .{ .option = .{
+            .long = "allow-unknown-type",
+            .description = "Allow -s or -t to query broken/corrupt objects of unknown type.",
+        } },
+        .{ .positional = .{
+            .name = "object",
+            .description = "The name of the object to show.",
+        } },
+        .{ .positional = .{
+            .name = "type",
+            .description = "The expected type for object.",
+        } },
+    },
 };
 
-fn run(allocator: Allocator, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: Command.Arguments) !void {
     const out = std.io.getStdOut().writer();
 
-    var allow_unknown_type = false;
-    var check_exists = false;
-    var pretty_print = false;
-    var get_size = false;
-    var get_type = false;
-
-    var positional_args = std.ArrayList([]const u8).init(allocator);
-    defer positional_args.deinit();
-
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-
-        if (std.mem.eql(u8, arg, "--allow-unknown-type")) {
-            allow_unknown_type = true;
-        } else if (std.mem.eql(u8, arg, "-e")) {
-            check_exists = true;
-        } else if (std.mem.eql(u8, arg, "-p")) {
-            pretty_print = true;
-        } else if (std.mem.eql(u8, arg, "-s")) {
-            get_size = true;
-        } else if (std.mem.eql(u8, arg, "-t")) {
-            get_type = true;
-        } else if (arg.len > 0 and arg[0] == '-') {
-            try out.print("Error: Unknown flag '{s}' for '{s}' command.\n", .{ arg, command.name });
-            return;
-        } else {
-            try positional_args.append(arg);
-        }
-    }
+    const allow_unknown_type = args.parsed.get("allow-unknown-type") != null;
+    const check_exists = args.parsed.get("e") != null;
+    const pretty_print = args.parsed.get("p") != null;
+    const get_size = args.parsed.get("s") != null;
+    const get_type = args.parsed.get("t") != null;
 
     const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
         error.GitDirNotFound => {
@@ -97,9 +79,9 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
     };
     defer repository.close(allocator);
 
-    if (positional_args.items.len > 1) {
-        const expected_type = positional_args.items[0];
-        const obj_name = positional_args.items[1];
+    if (args.positional.items.len > 1) {
+        const expected_type = args.positional.items[0];
+        const obj_name = args.positional.items[1];
 
         if (check_exists or pretty_print or get_size or get_type) {
             try out.print("Error: Too many arguments.\n", .{});
@@ -113,8 +95,8 @@ fn run(allocator: Allocator, args: []const []const u8) !void {
         defer allocator.free(bytes);
 
         try out.print("{s}", .{bytes});
-    } else if (positional_args.items.len > 0) {
-        const obj_name = positional_args.items[0];
+    } else if (args.positional.items.len > 0) {
+        const obj_name = args.positional.items[0];
 
         if (eptsCount(check_exists, pretty_print, get_size, get_type) > 1) {
             try out.print("Error: Selected flags are incompatible.\n", .{});

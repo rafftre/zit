@@ -4,10 +4,11 @@
 const std = @import("std");
 const zit = @import("zit");
 const build_options = @import("build_options");
+const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
+const usage_prefix = "  ";
 
-const help = @import("help.zig").command;
 const cat_file = @import("cat-file.zig").command;
 const hash_object = @import("hash-object.zig").command;
 const inflate = @import("inflate.zig").command;
@@ -15,12 +16,19 @@ const init_repo = @import("init.zig").command;
 const ls_files = @import("ls-files.zig").command;
 const version = @import("version.zig").command;
 
-/// The interface for a command.
-pub const Command = struct {
-    run: *const fn (allocator: Allocator, args: []const []const u8) anyerror!void,
-    name: []const u8,
-    description: []const u8,
-    usage_text: ?[]const u8,
+/// The help command.
+const help = Command{
+    .run = runHelp,
+    .name = "help",
+    .brief = "Show help information",
+    .description = "Show help information for a command.",
+    .usage_lines = "[<command>]",
+    .parameters = &[_]Command.Parameter{
+        .{ .positional = .{
+            .name = "command",
+            .description = "The name of the command for which to display help information.",
+        } },
+    },
 };
 
 /// The global list of all commands.
@@ -35,48 +43,19 @@ pub const commands = [_]Command{
     version,
 };
 
-/// Finds the requested command and executes it.
-pub fn run(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
-    const out = std.io.getStdOut().writer();
-
-    for (commands) |cmd| {
-        if (std.mem.eql(u8, cmd.name, name)) {
-            try cmd.run(allocator, args);
-            return;
-        }
-    }
-
-    try out.print("Error: Unknown command '{s}'\n\n", .{name});
-    try printUsage(out);
-}
-
-/// Shows help for a specific topic or command.
-pub inline fn printHelp(allocator: Allocator, topic: []const u8) !void {
-    try help.run(allocator, null, &[_][]const u8{topic});
-}
-
-/// Exits the application with an error status.
-pub inline fn fail() noreturn {
-    std.process.exit(1);
-}
-
 /// Prints the main usage description by iterating through the list of all commands.
 pub fn printUsage(writer: anytype) !void {
     try writer.print(
         \\{s}
         \\
         \\Usage:
-        \\  {s} <command> [arguments]
+        \\{s}{s} <command> [arguments]
         \\
-        \\Commands:
-        \\
-    , .{ build_options.app_description, build_options.app_name });
+    , .{ build_options.app_description, usage_prefix, build_options.app_name });
 
+    try writer.print("\nCommands:\n", .{});
     for (commands) |cmd| {
-        try writer.print(
-            "  {s:<20} {s}\n",
-            .{ cmd.name, cmd.description },
-        );
+        try writer.print("{s}{s:<20} {s}\n", .{ usage_prefix, cmd.name, cmd.brief });
     }
 
     try writer.print(
@@ -85,4 +64,52 @@ pub fn printUsage(writer: anytype) !void {
         \\
         \\
     , .{build_options.app_name});
+}
+
+/// Exits the application with an error status.
+pub inline fn fail() noreturn {
+    std.process.exit(1);
+}
+
+/// Finds the requested command and executes it.
+pub fn runCommand(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
+    const out = std.io.getStdOut().writer();
+
+    for (commands) |cmd| {
+        if (std.mem.eql(u8, cmd.name, name)) {
+            var cmd_args = Command.Arguments.init(allocator);
+            defer cmd_args.deinit(allocator);
+
+            cmd_args.parse(allocator, cmd, args, out) catch |err| {
+                std.log.debug("Failed to parse command arguments: {s}", .{@errorName(err)});
+                return;
+            };
+
+            try cmd.run(allocator, cmd_args);
+            return;
+        }
+    }
+
+    try out.print("Error: Unknown command '{s}'\n\n", .{name});
+    try printUsage(out);
+}
+
+fn runHelp(_: Allocator, args: Command.Arguments) !void {
+    const out = std.io.getStdOut().writer();
+
+    if (args.positional.items.len <= 0) {
+        try printUsage(out);
+        return;
+    }
+
+    const topic = args.positional.items[0];
+    for (commands) |cmd| {
+        if (std.mem.eql(u8, cmd.name, topic)) {
+            try out.print("{s} - {s}\n\n", .{ cmd.name, cmd.brief });
+            try cmd.printUsage(out, build_options.app_name);
+            return;
+        }
+    }
+
+    try out.print("No help topic for '{s}'\n\n", .{topic});
 }

@@ -3,56 +3,38 @@
 
 const std = @import("std");
 const zit = @import("zit");
-const build_options = @import("build_options");
+const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
 const GitRepository = zit.storage.GitRepositorySha1;
 
-const cli = @import("root.zig");
-
 /// The inflate command.
-pub const command = cli.Command{
+pub const command = Command{
     .run = run,
     .name = "inflate",
-    .description = "Decompresses an object in the repository",
-    .usage_text = std.fmt.comptimePrint(
-        \\Usage:
-        \\  {s} inflate <object>
-        \\
-        \\Description:
-        \\  Decompresses an object in the repository and prints its encoded version,
-        \\  i.e. header (type name, space, and length) and serialized data.
-        \\
-        \\  It only runs zlib to decompress an object, which can be useful for exploring
-        \\  the object database.
-        \\
-        \\Options:
-        \\  <object>
-        \\    The name of the object to decompress.
-        \\
-    , .{build_options.app_name}),
+    .brief = "Decompresses an object in the repository",
+    .description =
+    \\This command decompresses an object in the repository and prints its
+    \\encoded version, i.e. header (type name, space, and length) and
+    \\serialized data.
+    \\
+    \\It only runs zlib to decompress an object, which can be useful for
+    \\exploring the object database.
+    ,
+    .usage_lines = "<object>",
+    .parameters = &[_]Command.Parameter{
+        .{ .positional = .{
+            .name = "object",
+            .description = "The name of the object to decompress.",
+        } },
+    },
 };
 
-fn run(allocator: Allocator, args: []const []const u8) !void {
+fn run(allocator: Allocator, args: Command.Arguments) !void {
     const out = std.io.getStdOut().writer();
 
-    var positional_args = std.ArrayList([]const u8).init(allocator);
-    defer positional_args.deinit();
-
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const arg = args[i];
-
-        if (arg.len > 0 and arg[0] == '-') {
-            try out.print("Error: Unknown flag '{s}' for '{s}' command.\n", .{ arg, command.name });
-            return;
-        } else {
-            try positional_args.append(arg);
-        }
-    }
-
-    if (positional_args.items.len > 0) {
-        const hex = positional_args.items[0];
+    if (args.positional.items.len > 0) {
+        const hex = args.positional.items[0];
 
         const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
             error.GitDirNotFound => {

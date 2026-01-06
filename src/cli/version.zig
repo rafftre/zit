@@ -4,20 +4,19 @@
 const std = @import("std");
 const zit = @import("zit");
 const build_options = @import("build_options");
+const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
 
-const cli = @import("root.zig");
-
 /// The version command.
-pub const command = cli.Command{
+pub const command = Command{
     .run = run,
     .name = "version",
-    .description = "Show version information",
-    .usage_text = null,
+    .brief = "Show version information",
+    .description = "Show the version of the application.",
 };
 
-fn run(_: Allocator, _: []const []const u8) !void {
+fn run(_: Allocator, _: Command.Arguments) !void {
     const out = std.io.getStdOut().writer();
     try out.print("{s} version {s}\n", .{ build_options.app_name, build_options.app_version });
 }
