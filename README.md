@@ -28,6 +28,7 @@ The ideal use case would be to use it as a base kit for creating a higher-level 
 | Status | Step                                    |
 |:------:|-----------------------------------------|
 |   ⚠️   | Bootstrap and history building          |
+|   ❌   | Upgrade to Zig 0.15                     |
 |   ❌   | Branching and naming                    |
 |   ❌   | Remotes and transfer protocols          |
 |   ❌   | Storage formats (pack files)            |

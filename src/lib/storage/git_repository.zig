@@ -95,6 +95,7 @@ pub fn GitRepository(comptime Hasher: type) type {
         /// Loads in memory and returns the index.
         /// Caller owns the returned memory.
         pub fn loadIndex(self: *const Self, allocator: Allocator) !Index {
+            // TODO: handle error.FileNotFound when index file does not exists (create it?)
             const index_content = try self.readIndex(allocator);
             defer allocator.free(index_content);
 

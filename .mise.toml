@@ -1,0 +1,6 @@
+[env]
+_.path = "{{ cwd }}/bin"
+
+[tools]
+zig = "0.14.1"
+zls = "0.14.0"
