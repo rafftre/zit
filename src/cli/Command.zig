@@ -11,7 +11,7 @@ const build_options = @import("build_options");
 const Allocator = std.mem.Allocator;
 const usage_prefix = "  ";
 
-run: *const fn (allocator: Allocator, args: Arguments) anyerror!void,
+run: *const fn (allocator: Allocator, out: *std.Io.Writer, args: Arguments) anyerror!void,
 name: []const u8,
 brief: []const u8,
 description: []const u8,
@@ -46,52 +46,52 @@ pub fn getLongOption(self: *const Command, name: []const u8) ?Option {
     return null;
 }
 
-/// Outputs to `writer` the help message for the command.
+/// Writes to `out` the help message for the command.
 /// Text will be prefixed with `indent` string.
-pub fn printUsage(self: *const Command, writer: anytype, app_name: []const u8) !void {
-    try writer.print("Usage:\n", .{});
+pub fn printUsage(self: *const Command, out: *std.Io.Writer, app_name: []const u8) !void {
+    try out.print("Usage:\n", .{});
     if (self.usage_lines) |usage_lines| {
         var it = std.mem.splitSequence(u8, usage_lines, "\n");
         while (it.next()) |line| {
-            try writer.print("{s}{s} {s} {s}\n", .{ usage_prefix, app_name, self.name, line });
+            try out.print("{s}{s} {s} {s}\n", .{ usage_prefix, app_name, self.name, line });
         }
     } else {
-        try writer.print("{s}{s} {s}\n", .{ usage_prefix, app_name, self.name });
+        try out.print("{s}{s} {s}\n", .{ usage_prefix, app_name, self.name });
     }
 
-    try writer.print("\nDescription:\n", .{});
-    try printMultilineText(writer, usage_prefix, self.description);
+    try out.print("\nDescription:\n", .{});
+    try printMultilineText(out, usage_prefix, self.description);
 
     if (self.parameters) |parameters| {
-        try writer.print("\nParameters:\n", .{});
+        try out.print("\nParameters:\n", .{});
         for (parameters) |param| {
             switch (param) {
                 .option => |option| {
                     if (option.short) |short_name| {
-                        try writer.print("{s}-{c}\n", .{ usage_prefix, short_name });
+                        try out.print("{s}-{c}\n", .{ usage_prefix, short_name });
                     }
                     if (option.long) |long_name| {
-                        try writer.print("{s}--{s}\n", .{ usage_prefix, long_name });
+                        try out.print("{s}--{s}\n", .{ usage_prefix, long_name });
                     }
-                    try printMultilineText(writer, usage_prefix ** 2, option.description);
+                    try printMultilineText(out, usage_prefix ** 2, option.description);
                 },
                 .positional => |positional| {
-                    try writer.print("{s}<{s}>\n", .{ usage_prefix, positional.name });
-                    try printMultilineText(writer, usage_prefix ** 2, positional.description);
+                    try out.print("{s}<{s}>\n", .{ usage_prefix, positional.name });
+                    try printMultilineText(out, usage_prefix ** 2, positional.description);
                 },
             }
-            try writer.print("\n", .{});
+            try out.print("\n", .{});
         }
     } else {
         // add another newline for Windows
-        try writer.print("\n", .{});
+        try out.print("\n", .{});
     }
 }
 
-fn printMultilineText(writer: anytype, indent: []const u8, description: []const u8) !void {
+fn printMultilineText(out: *std.Io.Writer, indent: []const u8, description: []const u8) !void {
     var it = std.mem.splitSequence(u8, description, "\n");
     while (it.next()) |line| {
-        try writer.print("{s}{s}\n", .{ indent, line });
+        try out.print("{s}{s}\n", .{ indent, line });
     }
 }
 
@@ -105,8 +105,8 @@ pub const Parameter = union(enum) {
 /// An option can have a short name, a long name, or both.
 /// Options that have only the short name (i.e. flags) can be combined.
 pub const Option = struct {
-    short: ?u8 = undefined,
-    long: ?[]const u8 = undefined,
+    short: ?u8 = null,
+    long: ?[]const u8 = null,
     description: []const u8,
     require_value: bool = false,
 
@@ -145,14 +145,13 @@ pub const Arguments = struct {
     /// Long names are used as keys when available, otherwise short names.
     parsed: std.StringArrayHashMap([]const u8),
     /// Positional parameters, in the same order of the command line.
-    positional: std.ArrayList([]const u8),
+    positional: std.ArrayList([]const u8) = .empty,
 
     /// Initializes this struct.
     /// Free with `deinit`.
     pub fn init(allocator: Allocator) Arguments {
         return .{
             .parsed = std.StringArrayHashMap([]const u8).init(allocator),
-            .positional = std.ArrayList([]const u8).init(allocator),
         };
     }
 
@@ -165,17 +164,17 @@ pub const Arguments = struct {
         }
 
         self.parsed.deinit();
-        self.positional.deinit();
+        self.positional.deinit(allocator);
     }
 
     /// Parses command-line arguments according to command specification.
-    /// Outputs messages to writer.
+    /// Writes messages to `out`.
     pub fn parse(
         self: *Arguments,
         allocator: Allocator,
         command: Command,
         args: []const []const u8,
-        writer: anytype,
+        out: *std.Io.Writer,
     ) !void {
         if (command.parameters) |_| {
             var i: usize = 0;
@@ -184,21 +183,21 @@ pub const Arguments = struct {
 
                 // Check for long options
                 if (std.mem.startsWith(u8, arg, "--")) {
-                    const skip_next = try self.parseLongArg(allocator, command, args, i, writer);
+                    const skip_next = try self.parseLongArg(allocator, command, args, i, out);
                     if (skip_next) {
                         i += 1;
                     }
                 }
                 // Check for short options
                 else if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
-                    const skip_next = try self.parseShortArgs(allocator, command, args, i, writer);
+                    const skip_next = try self.parseShortArgs(allocator, command, args, i, out);
                     if (skip_next) {
                         i += 1;
                     }
                 }
                 // Positional argument
                 else {
-                    try self.positional.append(arg);
+                    try self.positional.append(allocator, arg);
                 }
             }
         }
@@ -212,7 +211,7 @@ pub const Arguments = struct {
         command: Command,
         args: []const []const u8,
         i: usize,
-        writer: anytype,
+        out: *std.Io.Writer,
     ) !bool {
         const arg = args[i];
         std.log.debug("Parsing long argument '{s}'", .{arg});
@@ -231,7 +230,7 @@ pub const Arguments = struct {
                 // --option format (value should be next arg)
 
                 if ((i + 1) >= args.len) {
-                    try writer.print("Error: '--{s}' requires a value.\n", .{opt_long});
+                    try out.print("Error: '--{s}' requires a value.\n", .{opt_long});
                     return error.MissingOptionValue;
                 }
 
@@ -249,7 +248,7 @@ pub const Arguments = struct {
             }
         }
 
-        try writer.print("Error: Unknown option '{s}' for '{s}' command.\n", .{ arg, command.name });
+        try out.print("Error: Unknown option '{s}' for '{s}' command.\n", .{ arg, command.name });
         return error.UnknownOption;
     }
 
@@ -261,7 +260,7 @@ pub const Arguments = struct {
         command: Command,
         args: []const []const u8,
         i: usize,
-        writer: anytype,
+        out: *std.Io.Writer,
     ) !bool {
         const arg = args[i];
         std.log.debug("Parsing short argument(s) '{s}'", .{arg});
@@ -277,7 +276,7 @@ pub const Arguments = struct {
                 if (option.require_value) {
                     if (char_idx != 1 or arg.len > 2) {
                         // Option is combined with other flags, which is not allowed
-                        try writer.print(
+                        try out.print(
                             "Error: option '-{c}' requires a value and cannot be combined with other flags.\n",
                             .{flag_char},
                         );
@@ -285,7 +284,7 @@ pub const Arguments = struct {
                     }
 
                     if ((i + 1) >= args.len) {
-                        try writer.print("Error: '-{c}' requires a value.\n", .{flag_char});
+                        try out.print("Error: '-{c}' requires a value.\n", .{flag_char});
                         return error.MissingOptionValue;
                     }
 
@@ -299,7 +298,7 @@ pub const Arguments = struct {
                 }
             }
 
-            try writer.print("Error: Unknown flag '-{c}' for '{s}' command.\n", .{ flag_char, command.name });
+            try out.print("Error: Unknown flag '-{c}' for '{s}' command.\n", .{ flag_char, command.name });
             return error.UnknownFlag;
         }
 

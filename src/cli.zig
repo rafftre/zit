@@ -2,19 +2,18 @@
 // SPDX-License-Identifier: MPL-2.0
 
 const std = @import("std");
-const zit = @import("zit");
 const build_options = @import("build_options");
-const Command = @import("Command.zig");
+const Command = @import("cli/Command.zig");
 
 const Allocator = std.mem.Allocator;
 const usage_prefix = "  ";
 
-const cat_file = @import("cat-file.zig").command;
-const hash_object = @import("hash-object.zig").command;
-const inflate = @import("inflate.zig").command;
-const init_repo = @import("init.zig").command;
-const ls_files = @import("ls-files.zig").command;
-const version = @import("version.zig").command;
+const cat_file = @import("cli/cat-file.zig").command;
+const hash_object = @import("cli/hash-object.zig").command;
+const inflate = @import("cli/inflate.zig").command;
+const init_repo = @import("cli/init.zig").command;
+const ls_files = @import("cli/ls-files.zig").command;
+const version = @import("cli/version.zig").command;
 
 /// The help command.
 const help = Command{
@@ -44,8 +43,8 @@ pub const commands = [_]Command{
 };
 
 /// Prints the main usage description by iterating through the list of all commands.
-pub fn printUsage(writer: anytype) !void {
-    try writer.print(
+pub fn printUsage(out: *std.Io.Writer) !void {
+    try out.print(
         \\{s}
         \\
         \\Usage:
@@ -53,12 +52,12 @@ pub fn printUsage(writer: anytype) !void {
         \\
     , .{ build_options.app_description, usage_prefix, build_options.app_name });
 
-    try writer.print("\nCommands:\n", .{});
+    try out.print("\nCommands:\n", .{});
     for (commands) |cmd| {
-        try writer.print("{s}{s:<20} {s}\n", .{ usage_prefix, cmd.name, cmd.brief });
+        try out.print("{s}{s:<20} {s}\n", .{ usage_prefix, cmd.name, cmd.brief });
     }
 
-    try writer.print(
+    try out.print(
         \\
         \\Run '{s} help <command>' for more information on a specific command.
         \\
@@ -67,14 +66,13 @@ pub fn printUsage(writer: anytype) !void {
 }
 
 /// Exits the application with an error status.
-pub inline fn fail() noreturn {
+pub inline fn fail(out: *std.Io.Writer) noreturn {
+    out.flush() catch {};
     std.process.exit(1);
 }
 
 /// Finds the requested command and executes it.
-pub fn runCommand(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
-    const out = std.io.getStdOut().writer();
-
+pub fn runCommand(allocator: Allocator, out: *std.Io.Writer, name: [:0]u8, args: [][:0]u8) !void {
     for (commands) |cmd| {
         if (std.mem.eql(u8, cmd.name, name)) {
             var cmd_args = Command.Arguments.init(allocator);
@@ -85,7 +83,7 @@ pub fn runCommand(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
                 return;
             };
 
-            try cmd.run(allocator, cmd_args);
+            try cmd.run(allocator, out, cmd_args);
             return;
         }
     }
@@ -94,9 +92,7 @@ pub fn runCommand(allocator: Allocator, name: [:0]u8, args: [][:0]u8) !void {
     try printUsage(out);
 }
 
-fn runHelp(_: Allocator, args: Command.Arguments) !void {
-    const out = std.io.getStdOut().writer();
-
+fn runHelp(_: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
     if (args.positional.items.len <= 0) {
         try printUsage(out);
         return;

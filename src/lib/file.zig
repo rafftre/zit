@@ -6,30 +6,41 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const MergeStage = @import("index.zig").MergeStage;
-const ObjectId = @import("model.zig").ObjectId;
-const FileMode = @import("helpers.zig").file.Mode;
+const fs = @import("model/util/fs.zig");
+const hash = @import("model/util/hash.zig");
+const Repository = @import("repository.zig").Repository;
 
 /// Information about a file in the index or in the working directory.
-pub const File = struct {
-    /// Path in the filesystem.
-    path: []const u8,
-    /// Object ID (only included for tracked files)
-    object_id: ?ObjectId = null,
-    /// File mode (only included for tracked files)
-    mode: ?FileMode = null,
-    /// Stage info (only included for tracked files)
-    merge_stage: ?MergeStage = null,
+pub fn File(comptime Hasher: type) type {
+    return struct {
+        /// Path in the filesystem.
+        path: []const u8,
+        /// Object ID (only included for tracked files)
+        object_id: ?*Repository(Hasher).Object.Id = null,
+        /// File mode (only included for tracked files)
+        mode: ?fs.FileMode = null,
+        /// Stage info (only included for tracked files)
+        merge_stage: ?Repository(Hasher).Index.MergeStage = null,
 
-    /// Comparison function for use with `std.mem.sort`.
-    /// Sort files in ascending order on the path field.
-    fn lessThan(_: void, lhs: File, rhs: File) bool {
-        return std.mem.order(u8, lhs.path, rhs.path) == .lt;
-    }
-};
+        const Self = @This();
 
-/// Options for `listFiles`.
-pub const ListFilesOptions = struct {
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            if (self.object_id) |oid| {
+                oid.deinit(allocator);
+            }
+            allocator.free(self.path);
+        }
+
+        /// Comparison function for use with `std.mem.sort`.
+        /// Sort files in ascending order on the path field.
+        pub fn lessThan(_: void, lhs: Self, rhs: Self) bool {
+            return std.mem.order(u8, lhs.path, rhs.path) == .lt;
+        }
+    };
+}
+
+/// Options for `list`.
+pub const ListOptions = struct {
     /// Reads cached (tracked) files.
     cached: bool = false,
     /// Reads others (untracked) files.
@@ -46,7 +57,7 @@ pub const ListFilesOptions = struct {
     stage_info: bool = false,
 
     /// Validites the combination of options.
-    fn check(self: *ListFilesOptions) void {
+    fn check(self: *ListOptions) void {
         // forces stage info when unmerged files are requested
         if (self.unmerged) {
             self.stage_info = true;
@@ -67,14 +78,21 @@ pub const ListFilesOptions = struct {
 /// Defaults to cached files if no option is set.
 /// Forces stage info when unmerged files are requested.
 /// Caller owns the returned memory.
-pub fn listFiles(allocator: Allocator, repository: anytype, opts: *ListFilesOptions) !std.ArrayList(File) {
+pub fn list(
+    allocator: Allocator,
+    /// The type of hasher.
+    comptime Hasher: type,
+    /// The repository to use for reading the index.
+    repository: Repository(Hasher),
+    opts: *ListOptions,
+) !std.ArrayList(File(Hasher)) {
     opts.check();
 
-    const index = try repository.loadIndex(allocator);
-    defer index.deinit();
+    var index = try repository.loadIndex(allocator);
+    defer index.deinit(allocator);
 
-    var res = std.ArrayList(File).init(allocator);
-    errdefer res.deinit();
+    var res: std.ArrayList(File(Hasher)) = .empty;
+    errdefer res.deinit(allocator);
 
     if (opts.others or opts.killed) {
         const worktree = repository.worktree();
@@ -92,7 +110,7 @@ pub fn listFiles(allocator: Allocator, repository: anytype, opts: *ListFilesOpti
             while (try walker.next()) |entry| {
                 // FIXME: remove use of ".git" path (move to repository?)
                 if (entry.kind == .file and !std.mem.startsWith(u8, entry.path, ".git") and !index.contains(entry.path)) {
-                    try appendUntrackedFile(allocator, &res, entry.path);
+                    try appendUntrackedFile(allocator, Hasher, &res, entry.path);
                 }
             }
         }
@@ -101,25 +119,25 @@ pub fn listFiles(allocator: Allocator, repository: anytype, opts: *ListFilesOpti
             while (try walker.next()) |entry| {
                 // FIXME: remove use of ".git" path (move to repository?)
                 if (!std.mem.startsWith(u8, entry.path, ".git") and index.containsPrefix(entry.path, true)) {
-                    try appendUntrackedFile(allocator, &res, entry.path);
+                    try appendUntrackedFile(allocator, Hasher, &res, entry.path);
                 }
             }
         }
 
-        std.mem.sort(File, res.items, {}, File.lessThan);
+        std.mem.sort(File(Hasher), res.items, {}, File(Hasher).lessThan);
     }
 
     if (opts.cached or opts.stage_info or opts.deleted or opts.modified) {
         for (index.entries.items) |entry| {
             if (opts.deleted) {
                 std.fs.cwd().access(entry.path, .{}) catch |err| switch (err) {
-                    error.FileNotFound => try appendTrackedFile(allocator, &res, entry, false),
+                    error.FileNotFound => try appendTrackedFile(allocator, Hasher, &res, entry, false),
                     else => return err,
                 };
             } else if (opts.modified) {
                 const stat = std.fs.cwd().statFile(entry.path) catch |err| switch (err) {
                     error.FileNotFound => {
-                        try appendTrackedFile(allocator, &res, entry, false);
+                        try appendTrackedFile(allocator, Hasher, &res, entry, false);
                         continue;
                     },
                     error.NotDir => continue,
@@ -127,10 +145,10 @@ pub fn listFiles(allocator: Allocator, repository: anytype, opts: *ListFilesOpti
                 };
 
                 if (entry.isChanged(stat)) {
-                    try appendTrackedFile(allocator, &res, entry, false);
+                    try appendTrackedFile(allocator, Hasher, &res, entry, false);
                 }
             } else if ((opts.cached or opts.stage_info) and (!opts.unmerged or entry.isUnmerged())) {
-                try appendTrackedFile(allocator, &res, entry, opts.stage_info);
+                try appendTrackedFile(allocator, Hasher, &res, entry, opts.stage_info);
             }
         }
     }
@@ -138,34 +156,59 @@ pub fn listFiles(allocator: Allocator, repository: anytype, opts: *ListFilesOpti
     return res;
 }
 
-inline fn appendTrackedFile(
+fn appendTrackedFile(
     allocator: Allocator,
-    list: *std.ArrayList(File),
-    entry: anytype,
+    comptime Hasher: type,
+    target: *std.ArrayList(File(Hasher)),
+    entry: Repository(Hasher).Index.Entry,
     stage_info: bool,
 ) !void {
-    const file = try list.addOne();
-
-    file.path = try allocator.dupe(u8, entry.path);
+    var file = try target.addOne(allocator);
+    file.* = .{
+        .path = try allocator.dupe(u8, entry.path),
+    };
 
     if (stage_info) {
-        file.object_id = ObjectId.init(.{});
-        @memcpy(&file.object_id.?.bytes, &entry.hash);
+        var oid = try allocator.create(Repository(Hasher).Object.Id);
+        @memcpy(&oid.bytes, &entry.hash);
 
+        file.object_id = oid;
         file.mode = entry.file_mode;
         file.merge_stage = entry.flags.stage;
     }
 }
 
-inline fn appendUntrackedFile(
+fn appendUntrackedFile(
     allocator: Allocator,
-    list: *std.ArrayList(File),
+    comptime Hasher: type,
+    target: *std.ArrayList(File(Hasher)),
     path: []const u8,
 ) !void {
-    const file = try list.addOne();
+    const file = try target.addOne(allocator);
+    file.* = .{
+        .path = try allocator.dupe(u8, path),
+    };
+}
 
-    file.path = try allocator.dupe(u8, path);
-    file.object_id = null;
-    file.mode = null;
-    file.merge_stage = null;
+test "list files" {
+    const allocator = std.testing.allocator;
+    const test_hasher = hash.Sha1;
+
+    var repo: Repository(test_hasher) = try .open(allocator, .git, null);
+    defer repo.deinit(allocator);
+
+    var opts: ListOptions = .{
+        .cached = true,
+        .others = true,
+    };
+
+    var file_list = try list(allocator, test_hasher, repo, &opts);
+    defer {
+        for (file_list.items) |*f| {
+            f.deinit(allocator);
+        }
+        file_list.deinit(allocator);
+    }
+
+    try std.testing.expect(file_list.items.len > 0);
 }

@@ -6,7 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
-const GitRepository = zit.storage.GitRepositorySha1;
+const Sha1 = zit.hash.Sha1;
 
 /// The inflate command.
 pub const command = Command{
@@ -30,13 +30,11 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, args: Command.Arguments) !void {
-    const out = std.io.getStdOut().writer();
-
+fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
     if (args.positional.items.len > 0) {
-        const hex = args.positional.items[0];
+        const obj_name = args.positional.items[0];
 
-        const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+        var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
             error.GitDirNotFound => {
                 try out.print(
                     "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -46,11 +44,18 @@ fn run(allocator: Allocator, args: Command.Arguments) !void {
             },
             else => return err,
         };
-        defer repository.close(allocator);
+        defer repo.deinit(allocator);
 
-        const encoded_data = try zit.readEncodedData(allocator, repository.store, hex);
-        defer allocator.free(encoded_data);
+        var obj_id = try zit.Repository(Sha1).Object.Id.fromHex(allocator, obj_name);
+        defer obj_id.deinit(allocator);
 
-        try out.print("{s}", .{encoded_data});
+        var bytes: std.Io.Writer.Allocating = .init(allocator);
+        defer bytes.deinit();
+
+        try repo.readObject(allocator, &bytes.writer, obj_id);
+
+        try out.print("{s}", .{bytes.written()});
+    } else {
+        try out.print("Error: <object> is required.\n", .{});
     }
 }

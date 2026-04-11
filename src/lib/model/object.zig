@@ -4,109 +4,459 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const Blob = @import("Blob.zig");
-const Commit = @import("Commit.zig");
-const Tag = @import("Tag.zig");
-const Tree = @import("Tree.zig");
+const hash = @import("util/hash.zig");
 
-/// The tag for an Object.
-pub const Type = enum(u3) {
+pub const Blob = @import("blob.zig").Blob;
+pub const Commit = @import("commit.zig").Commit;
+pub const Tag = @import("tag.zig").Tag;
+pub const Tree = @import("tree.zig").Tree;
+pub const TreeEntryType = @import("tree.zig").EntryType;
+
+/// The type for an object.
+pub const Type = enum(u4) {
     blob,
     commit,
     tag,
     tree,
-
-    /// Returns the tag of an object.
-    pub fn of(obj: Object) Type {
-        switch (obj) {
-            .blob => return Type.blob,
-            .commit => return Type.commit,
-            .tag => return Type.tag,
-            .tree => return Type.tree,
-        }
-    }
+    _,
 
     /// Parses a tag from a string.
-    pub fn parse(type_str: ?[]const u8) ?Type {
-        if (type_str) |s| {
+    /// Returns null when the tag is unknown.
+    pub fn parse(str: ?[]const u8) ?Type {
+        if (str) |s| {
             return std.meta.stringToEnum(Type, s);
         }
         return null;
     }
-};
 
-/// The interface for an object.
-pub const Object = union(Type) {
-    blob: Blob,
-    commit: Commit,
-    tag: Tag,
-    tree: Tree,
-
-    /// Calls `deinit` on the child object.
-    pub fn deinit(self: *const Object, allocator: Allocator) void {
-        switch (self.*) {
-            inline else => |*s| s.*.deinit(allocator),
-        }
-    }
-
-    /// Deserializes an object from `data`.
-    /// Free with `deinit`.
-    pub fn deserialize(allocator: Allocator, obj_type: Type, data: []const u8) !Object {
-        return switch (obj_type) {
-            .blob => .{ .blob = try Blob.deserialize(allocator, data) },
-            .commit => .{ .commit = try Commit.deserialize(allocator, data) },
-            .tag => .{ .tag = try Tag.deserialize(allocator, data) },
-            .tree => .{ .tree = try Tree.deserialize(allocator, data) },
+    /// Converts the tag to an optional string.
+    /// Returns null when the tag is unknown.
+    pub fn toString(typ: Type) ?[]const u8 {
+        return switch (typ) {
+            .blob, .commit, .tag, .tree => @tagName(typ),
+            else => null,
         };
     }
 
-    /// Serializes the object content.
-    pub fn serialize(self: *const Object, allocator: Allocator) ![]u8 {
-        switch (self.*) {
-            inline else => |*s| return s.*.serialize(allocator),
-        }
-    }
-
-    /// Formatting method for use with `std.fmt.format`.
-    /// Format and options are ignored.
-    pub fn format(
-        self: Object,
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        switch (self) {
-            inline else => |s| try s.format(fmt, options, writer),
-        }
+    /// Returns `true` if t is a knwon tag.
+    pub fn isKnown(typ: Type) bool {
+        return switch (typ) {
+            .blob, .commit, .tag, .tree => true,
+            else => false,
+        };
     }
 };
 
-test "blob with object interface" {
+/// An object in raw format.
+/// It's a binary blob of data with a type name.
+pub fn LooseObject(comptime Hasher: type) type {
+    return struct {
+        object_type: Type = .blob,
+        content: []u8,
+
+        const Self = @This();
+
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            allocator.free(self.content);
+        }
+
+        /// Encodes the object as a sequence of bytes formed by
+        /// - an header (object type name + space + data length),
+        /// - a null byte,
+        /// - the serialized binary data of the object.
+        pub fn encode(self: *const Self, allocator: Allocator) ![]u8 {
+            const type_name = self.object_type.toString() orelse "unknown";
+            return try std.fmt.allocPrint(
+                allocator,
+                "{s} {d}\x00{s}",
+                .{ type_name, self.content.len, self.content },
+            );
+        }
+
+        /// Options for `decode`.
+        pub const DecodeOptions = struct {
+            /// Set this to prevent an error from being returned when reading an unknown tag.
+            allow_unknown_type: bool = false,
+            /// Use this to verify that the type name matches.
+            /// If not, `error.TypeMismatch` will be returned.
+            expected_type: ?Type = null,
+            /// Use this to verify that the content matches.
+            /// If not, `error.HashMismatch` will be returned.
+            expected_hash: ?[Hasher.hash_size]u8 = null,
+        };
+
+        /// Decodes into an object the sequence of bytes formed by
+        /// - an header (object type name + space + data length),
+        /// - a null byte,
+        /// - the serialized binary data of the object.
+        /// Deinitialize with `deinit`.
+        pub fn decode(allocator: Allocator, bytes: []u8, options: DecodeOptions) !Self {
+            const null_index = std.mem.indexOf(u8, bytes, "\x00") orelse return error.MissingHeader;
+            if (null_index >= bytes.len) {
+                return error.MissingHeader;
+            }
+
+            const space_index = std.mem.indexOf(u8, bytes, " ") orelse return error.MalformedHeader;
+            if (space_index >= null_index or space_index >= bytes.len) {
+                return error.MalformedHeader;
+            }
+
+            const type_str = bytes[0..space_index];
+            const len_str = bytes[(space_index + 1)..null_index];
+            const content = bytes[(null_index + 1)..];
+
+            try checkHash(bytes, options.expected_hash);
+            try checkLength(len_str, content.len);
+            const typ = try extractType(type_str, options.expected_type, options.allow_unknown_type);
+
+            return .{ .object_type = typ, .content = try allocator.dupe(u8, content) };
+        }
+
+        /// Formatting method for use with `std.io.Writer.print`.
+        /// Outputs content as a string.
+        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+            try writer.print("{s}", .{self.content});
+        }
+
+        fn checkHash(bytes: []u8, expected: ?[Hasher.hash_size]u8) !void {
+            if (expected) |check_id| {
+                var obj_id: [Hasher.hash_size]u8 = undefined;
+                Hasher.hashData(bytes, &obj_id);
+
+                if (!std.mem.eql(u8, &check_id, &obj_id)) {
+                    var obj_id_buf: [Hasher.hash_size * 2]u8 = undefined;
+                    var w: std.io.Writer = .fixed(&obj_id_buf);
+                    try hash.formatAsHex(&obj_id, &w);
+
+                    std.log.debug("Found mismatching ID: '{s}'", .{obj_id});
+                    return error.HashMismatch;
+                }
+            }
+        }
+
+        fn checkLength(str: []u8, expected: usize) !void {
+            const len = std.fmt.parseInt(usize, str, 10) catch return error.BadLength;
+            if (len != expected) {
+                std.log.debug("Found mismatching length: {d}", .{len});
+                return error.LengthMismatch;
+            }
+        }
+
+        fn extractType(str: []u8, expected: ?Type, allow_unknown: bool) !Type {
+            const typ = std.meta.stringToEnum(Type, str) orelse {
+                if (allow_unknown) {
+                    std.log.debug("Found unknown type: '{s}'", .{str});
+                    return @enumFromInt(@typeInfo(Type).@"enum".fields.len);
+                }
+                return error.UnknownType;
+            };
+
+            if (expected) |e| {
+                if (typ != e) return error.TypeMismatch;
+            }
+
+            return typ;
+        }
+    };
+}
+
+test "format loose object" {
+    const test_data = "Hello, Git blob!";
+
+    var buf: [32]u8 = undefined;
+    var w: std.io.Writer = .fixed(&buf);
+
+    const self: LooseObject(hash.Sha1) = .{
+        .object_type = .blob,
+        .content = @constCast(test_data),
+    };
+    try w.print("{f}", .{self});
+
+    try std.testing.expectEqualStrings(test_data, w.buffered());
+}
+
+test "encode object" {
+    const allocator = std.testing.allocator;
+
+    const test_content = "Hello, Git blob!";
+    const test_bytes = "blob 16\x00" ++ test_content;
+
+    const obj: LooseObject(hash.Sha1) = .{ .content = @constCast(test_content) };
+
+    const encoded = try obj.encode(allocator);
+    defer allocator.free(encoded);
+
+    try std.testing.expectEqualStrings(test_bytes, encoded);
+}
+
+test "decode object" {
+    const allocator = std.testing.allocator;
+
+    const test_type: Type = .blob;
+    const test_content = "Hello, Git blob!";
+    const test_bytes = "blob 16\x00" ++ test_content;
+
+    const test_hex = "420d00a951a59d664d3617a1f4f6e2de8091049f";
+
+    var test_hash: [hash.Sha1.hash_size]u8 = undefined;
+    try hash.parseHex(test_hex, &test_hash);
+
+    var decoded = try LooseObject(hash.Sha1).decode(
+        allocator,
+        @constCast(test_bytes),
+        .{
+            .expected_type = test_type,
+            .expected_hash = test_hash,
+        },
+    );
+    defer decoded.deinit(allocator);
+
+    try std.testing.expectEqual(test_type, decoded.object_type);
+    try std.testing.expectEqual(test_content.len, decoded.content.len);
+    try std.testing.expectEqualStrings(test_content, decoded.content);
+}
+
+test "decode object errors" {
+    const allocator = std.testing.allocator;
+    const object = LooseObject(hash.Sha1);
+
+    var test_hash: [hash.Sha1.hash_size]u8 = undefined;
+    try hash.parseHex("30f51a3fba5274d53522d0f19748456974647b4f", &test_hash);
+
+    // read known tag while allowing unknown
+    var known = try object.decode(
+        allocator,
+        @constCast("blob 13\x00hello, world!"),
+        .{ .allow_unknown_type = true },
+    );
+    defer known.deinit(allocator);
+    try std.testing.expect(known.object_type == .blob);
+    try std.testing.expectEqual(13, known.content.len);
+    try std.testing.expectEqualSlices(u8, "hello, world!", known.content);
+
+    // read unknown tag
+    var unk = try object.decode(
+        allocator,
+        @constCast("test 13\x00hello, world!"),
+        .{ .allow_unknown_type = true },
+    );
+    defer unk.deinit(allocator);
+    try std.testing.expect(!unk.object_type.isKnown());
+    try std.testing.expectEqual(13, unk.content.len);
+    try std.testing.expectEqualSlices(u8, "hello, world!", unk.content);
+
+    // read empty data
+    var nodata = try object.decode(allocator, @constCast("blob 0\x00"), .{});
+    defer nodata.deinit(allocator);
+    try std.testing.expect(nodata.object_type == .blob);
+    try std.testing.expectEqual(0, nodata.content.len);
+    try std.testing.expectEqualSlices(u8, "", nodata.content);
+
+    // unknown tag error
+    try std.testing.expectError(
+        error.UnknownType,
+        object.decode(allocator, @constCast("test 13\x00hello, world!"), .{ .allow_unknown_type = false }),
+    );
+
+    // mismatching tag error
+    try std.testing.expectError(
+        error.TypeMismatch,
+        object.decode(allocator, @constCast("tree 13\x00hello, world!"), .{ .expected_type = .blob }),
+    );
+
+    // mismatching length error
+    try std.testing.expectError(
+        error.LengthMismatch,
+        object.decode(allocator, @constCast("blob 12\x00hello, world!"), .{}),
+    );
+
+    // bad length error
+    try std.testing.expectError(
+        error.BadLength,
+        object.decode(allocator, @constCast("blob aa\x00hello, world!"), .{}),
+    );
+
+    // mismatching object ID error
+    try std.testing.expectError(
+        error.HashMismatch,
+        object.decode(allocator, @constCast("blob 13\x00hello, world"), .{ .expected_hash = test_hash }),
+    );
+
+    // missing header error
+    try std.testing.expectError(
+        error.MissingHeader,
+        object.decode(allocator, @constCast("blob 130hello, world!"), .{}),
+    );
+    try std.testing.expectError(
+        error.MissingHeader,
+        object.decode(allocator, @constCast("hello, world!"), .{}),
+    );
+    try std.testing.expectError(
+        error.MissingHeader,
+        object.decode(allocator, @constCast("hello,world!"), .{}),
+    );
+    try std.testing.expectError(
+        error.MissingHeader,
+        object.decode(allocator, @constCast(""), .{}),
+    );
+
+    // malformed header error
+    try std.testing.expectError(
+        error.MalformedHeader,
+        object.decode(allocator, @constCast("blob13\x00hello, world!"), .{}),
+    );
+    try std.testing.expectError(
+        error.MalformedHeader,
+        object.decode(allocator, @constCast("blob13\x00hello,world!"), .{}),
+    );
+}
+
+/// The interface for an object.
+pub fn Object(comptime Hasher: type) type {
+    return union(enum(u4)) {
+        blob: Blob(Hasher),
+        commit: Commit(Hasher),
+        tag: Tag(Hasher),
+        tree: Tree(Hasher),
+
+        const Self = @This();
+
+        /// An object ID.
+        /// Identifies the object content.
+        pub const Id = struct {
+            bytes: [Hasher.hash_size]u8 = [_]u8{0} ** Hasher.hash_size,
+
+            pub fn deinit(id: *Id, allocator: Allocator) void {
+                allocator.destroy(id);
+            }
+
+            /// Parses an object ID from an hexadecimal string.
+            /// Deinitialize with `deinit`.
+            pub fn fromHex(allocator: Allocator, hex: []const u8) !*Id {
+                var id = try allocator.create(Id);
+                errdefer allocator.destroy(id);
+
+                try hash.parseHex(hex, &id.bytes);
+
+                return id;
+            }
+
+            /// Formats this object ID as an hexadecimal string.
+            /// Caller owns the returned memory.
+            pub fn toHex(id: *Id, allocator: Allocator) ![]u8 {
+                const res = try allocator.alloc(u8, Hasher.hash_size * 2);
+                errdefer allocator.free(res);
+
+                try hash.toHex(&id.bytes, res);
+
+                return res;
+            }
+
+            /// Returns `true` if the object IDs are equal.
+            pub fn eql(a: *const Id, b: *const Id) bool {
+                return std.mem.eql(u8, &a.bytes, &b.bytes);
+            }
+
+            /// Formatting method for use with `std.io.Writer.print`.
+            /// Outputs an hexadecimal string.
+            pub fn format(id: *const Id, writer: *std.io.Writer) !void {
+                try hash.formatAsHex(@constCast(id.bytes[0..]), writer);
+            }
+        };
+
+        /// Calls `deinit` on the child object.
+        pub fn deinit(self: *Self, allocator: Allocator) void {
+            switch (self.*) {
+                inline else => |*s| s.*.deinit(allocator),
+            }
+        }
+
+        /// Deserializes an object.
+        /// Deinitialize with `deinit`.
+        pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
+            return switch (obj.object_type) {
+                .commit => .{ .commit = try .deserialize(allocator, obj) },
+                .tag => .{ .tag = try .deserialize(allocator, obj) },
+                .tree => .{ .tree = try .deserialize(allocator, obj) },
+                else => .{ .blob = try Blob(Hasher).deserialize(allocator, obj) },
+            };
+        }
+
+        /// Serializes the object.
+        /// Caller owns the returned memory.
+        pub fn serialize(self: *const Self, allocator: Allocator) !LooseObject(Hasher) {
+            switch (self.*) {
+                inline else => |*s| return s.*.serialize(allocator),
+            }
+        }
+
+        /// Formatting method for use with `std.io.Writer.print`.
+        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+            switch (self.*) {
+                inline else => |*s| try s.format(writer),
+            }
+        }
+    };
+}
+
+test "object id" {
+    const allocator = std.testing.allocator;
+
+    const Oid = Object(hash.Sha1).Id;
+
+    var empty_oid: Oid = undefined;
+
+    const test_chars = "0123456789abcdeffedcba98765432100f1e2d3c";
+    var test_oid: Oid = .{ .bytes = [_]u8{
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc,
+        0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
+    } };
+
+    const copy_oid = try allocator.dupe(u8, &test_oid.bytes);
+    defer allocator.free(copy_oid);
+
+    var test_copy_oid: Oid = .{ .bytes = copy_oid[0..hash.Sha1.hash_size].* };
+
+    try std.testing.expect(!empty_oid.eql(&test_oid));
+    try std.testing.expect(test_oid.eql(&test_copy_oid));
+
+    var buf: [hash.Sha1.hash_size * 2]u8 = undefined;
+    var w: std.io.Writer = .fixed(&buf);
+
+    try w.print("{f}", .{test_oid});
+    try std.testing.expectEqualStrings(test_chars, w.buffered());
+}
+
+test "blob via object interface" {
     const allocator = std.testing.allocator;
 
     const test_data = "Hello, Git blob!";
 
-    var obj = Blob.init(.{ .content = @constCast(test_data) }).interface();
+    var blob_obj: Blob(hash.Sha1) = .{ .content = try allocator.dupe(u8, test_data) };
 
-    const serialized = try obj.serialize(allocator);
-    defer allocator.free(serialized);
+    var obj = blob_obj.interface();
+    defer obj.deinit(allocator);
 
-    var deserialized = try Object.deserialize(allocator, .blob, serialized);
+    try std.testing.expectEqualStrings("blob", @tagName(obj));
+
+    var serialized = try obj.serialize(allocator);
+    defer serialized.deinit(allocator);
+
+    try std.testing.expect(serialized.object_type == .blob);
+
+    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expectEqual(Type.of(obj), Type.of(deserialized));
-    try std.testing.expectEqualSlices(u8, test_data, deserialized.blob.content);
+    try std.testing.expectEqualSlices(u8, blob_obj.content, deserialized.blob.content);
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
 
-    try std.fmt.format(buf.writer(), "{any}", .{deserialized});
+    try buf.print(allocator, "{f}", .{deserialized});
     try std.testing.expectEqualSlices(u8, test_data, buf.items);
 }
 
-test "tree with object interface" {
-    const ObjectId = @import("ObjectId.zig");
-    const TreeEntry = @import("TreeEntry.zig");
+test "tree via object interface" {
     const allocator = std.testing.allocator;
 
     const test_data =
@@ -114,33 +464,39 @@ test "tree with object interface" {
         \\
     ;
 
-    var obj = Tree.init(.{ .entries = std.ArrayList(TreeEntry).init(allocator) }).interface();
-    defer obj.tree.entries.deinit();
+    var tree_obj: Tree(hash.Sha1) = .{};
+    _ = try tree_obj.addEntry(
+        allocator,
+        .blob,
+        try .fromHex(allocator, "0123456789abcdef0123456789abcdef01234567"),
+        "README.md",
+    );
 
-    try obj.tree.addEntry(.{
-        .name = @constCast("README.md"),
-        .object_id = try ObjectId.parseHex("0123456789abcdef0123456789abcdef01234567"),
-    });
+    var obj = tree_obj.interface();
+    defer obj.deinit(allocator);
 
-    const serialized = try obj.serialize(allocator);
-    defer allocator.free(serialized);
+    try std.testing.expectEqualStrings("tree", @tagName(obj));
 
-    var deserialized = try Object.deserialize(allocator, .tree, serialized);
+    var serialized = try obj.serialize(allocator);
+    defer serialized.deinit(allocator);
+
+    try std.testing.expect(serialized.object_type == .tree);
+
+    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(deserialized.tree.entries.items.len == 1);
-    try std.testing.expect(deserialized.tree.entries.items[0].mode_type == .blob);
+    try std.testing.expectEqual(1, deserialized.tree.entries.items.len);
+    try std.testing.expect(deserialized.tree.entries.items[0].entry_type == .blob);
     try std.testing.expect(std.mem.eql(u8, deserialized.tree.entries.items[0].name, "README.md"));
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
 
-    try std.fmt.format(buf.writer(), "{any}", .{deserialized});
+    try buf.print(allocator, "{f}", .{deserialized});
     try std.testing.expectEqualSlices(u8, test_data, buf.items);
 }
 
-test "commit with object interface" {
-    const ObjectId = @import("ObjectId.zig");
+test "commit via object interface" {
     const allocator = std.testing.allocator;
 
     const test_data =
@@ -153,47 +509,54 @@ test "commit with object interface" {
         \\Test commit message
     ;
 
-    var commit = Commit.init(.{
-        .tree = try ObjectId.parseHex("1234567890abcdef1234567890abcdef12345678"),
-        .parents = std.ArrayList(ObjectId).init(allocator),
+    var commit_obj: Commit(hash.Sha1) = .{
+        .tree = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
         .author = .{
-            .identity = .{ .name = "Test Author", .email = "author@example.com" },
-            .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_min = 120 },
+            .identity = .{
+                .name = try allocator.dupe(u8, "Test Author"),
+                .email = try allocator.dupe(u8, "author@example.com"),
+            },
+            .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
         .committer = .{
-            .identity = .{ .name = "Test Committer", .email = "committer@example.com" },
-            .time = .{ .seconds_from_epoch = 1640995300, .tz_offset_min = 120 },
+            .identity = .{
+                .name = try allocator.dupe(u8, "Test Committer"),
+                .email = try allocator.dupe(u8, "committer@example.com"),
+            },
+            .time = .{ .seconds_from_epoch = 1640995300, .tz_offset_minutes = 120 },
         },
-        .message = "Test commit message",
-    });
-    defer commit.parents.deinit();
+        .message = try allocator.dupe(u8, "Test commit message"),
+    };
+    try commit_obj.addParent(allocator, try .fromHex(allocator, "fedcba0987654321fedcba0987654321fedcba09"));
+    try commit_obj.addParent(allocator, try .fromHex(allocator, "ba0987654321fedcba0987654321fedcba09fedc"));
 
-    try commit.addParent("fedcba0987654321fedcba0987654321fedcba09");
-    try commit.addParent("ba0987654321fedcba0987654321fedcba09fedc");
+    var obj = commit_obj.interface();
+    defer obj.deinit(allocator);
 
-    var obj = commit.interface();
+    try std.testing.expectEqualStrings("commit", @tagName(obj));
 
-    const serialized = try obj.serialize(allocator);
-    defer allocator.free(serialized);
+    var serialized = try obj.serialize(allocator);
+    defer serialized.deinit(allocator);
 
-    var deserialized = try Object.deserialize(allocator, .commit, serialized);
+    try std.testing.expect(serialized.object_type == .commit);
+
+    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(commit.tree.eql(&deserialized.commit.tree));
-    try std.testing.expectEqual(2, deserialized.commit.parents.items.len);
-    try std.testing.expect(commit.author.eql(&deserialized.commit.author));
-    try std.testing.expect(commit.committer.eql(&deserialized.commit.committer));
-    try std.testing.expectEqualStrings(commit.message, deserialized.commit.message);
+    try std.testing.expect(commit_obj.tree.eql(deserialized.commit.tree));
+    try std.testing.expectEqual(commit_obj.parents.items.len, deserialized.commit.parents.items.len);
+    try std.testing.expect(commit_obj.author.eql(&deserialized.commit.author));
+    try std.testing.expect(commit_obj.committer.eql(&deserialized.commit.committer));
+    try std.testing.expectEqualStrings(commit_obj.message, deserialized.commit.message);
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
 
-    try std.fmt.format(buf.writer(), "{any}", .{deserialized});
+    try buf.print(allocator, "{f}", .{deserialized});
     try std.testing.expectEqualSlices(u8, test_data, buf.items);
 }
 
-test "tag with object interface" {
-    const ObjectId = @import("ObjectId.zig");
+test "tag via object interface" {
     const allocator = std.testing.allocator;
 
     const test_data =
@@ -205,34 +568,42 @@ test "tag with object interface" {
         \\Test tag message
     ;
 
-    const tag = Tag.init(.{
-        .object_id = try ObjectId.parseHex("1234567890abcdef1234567890abcdef12345678"),
+    var tag_obj: Tag(hash.Sha1) = .{
+        .object_id = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
-            .identity = .{ .name = "Test Author", .email = "author@example.com" },
-            .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_min = 120 },
+            .identity = .{
+                .name = try allocator.dupe(u8, "Test Author"),
+                .email = try allocator.dupe(u8, "author@example.com"),
+            },
+            .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
-        .name = "test-tag",
-        .message = "Test tag message",
-    });
+        .name = try allocator.dupe(u8, "test-tag"),
+        .message = try allocator.dupe(u8, "Test tag message"),
+    };
 
-    var obj = tag.interface();
+    var obj = tag_obj.interface();
+    defer obj.deinit(allocator);
 
-    const serialized = try obj.serialize(allocator);
-    defer allocator.free(serialized);
+    try std.testing.expectEqualStrings("tag", @tagName(obj));
 
-    var deserialized = try Object.deserialize(allocator, .tag, serialized);
+    var serialized = try obj.serialize(allocator);
+    defer serialized.deinit(allocator);
+
+    try std.testing.expect(serialized.object_type == .tag);
+
+    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(tag.object_id.eql(&deserialized.tag.object_id));
-    try std.testing.expect(tag.object_type == deserialized.tag.object_type);
-    try std.testing.expect(tag.tagger.eql(&deserialized.tag.tagger));
-    try std.testing.expectEqualStrings(tag.name, deserialized.tag.name);
-    try std.testing.expectEqualStrings(tag.message, deserialized.tag.message);
+    try std.testing.expect(tag_obj.object_id.eql(deserialized.tag.object_id));
+    try std.testing.expectEqual(tag_obj.object_type, deserialized.tag.object_type);
+    try std.testing.expect(tag_obj.tagger.eql(&deserialized.tag.tagger));
+    try std.testing.expectEqualStrings(tag_obj.name, deserialized.tag.name);
+    try std.testing.expectEqualStrings(tag_obj.message, deserialized.tag.message);
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
 
-    try std.fmt.format(buf.writer(), "{any}", .{deserialized});
+    try buf.print(allocator, "{f}", .{deserialized});
     try std.testing.expectEqualSlices(u8, test_data, buf.items);
 }

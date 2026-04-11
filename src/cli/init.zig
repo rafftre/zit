@@ -6,8 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
-const GitRepository = zit.storage.GitRepositorySha1;
-const SetupOptions = zit.storage.SetupOptions;
+const Sha1 = zit.hash.Sha1;
 
 /// The init command.
 pub const command = Command{
@@ -59,12 +58,11 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, args: Command.Arguments) !void {
-    const out = std.io.getStdOut().writer();
+fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+    const name = if (args.positional.items.len > 0) args.positional.items[0] else null;
 
-    var options: SetupOptions = .{
+    var options: zit.SetupOptions = .{
         .bare = args.parsed.get("bare") != null,
-        .name = if (args.positional.items.len > 0) args.positional.items[0] else null,
     };
 
     const initial_branch = args.parsed.get("initial-branch");
@@ -72,8 +70,8 @@ fn run(allocator: Allocator, args: Command.Arguments) !void {
         options.initial_branch = branch;
     }
 
-    const repository = try GitRepository.setup(allocator, options);
-    defer repository.close(allocator);
+    var repo = try zit.Repository(Sha1).setup(allocator, .git, name, options);
+    defer repo.deinit(allocator);
 
-    try out.print("Initialized empty Git repository in {s}\n", .{repository.repo.name() orelse "unknown"});
+    try out.print("Initialized empty Git repository in {s}\n", .{repo.name() orelse "unknown"});
 }

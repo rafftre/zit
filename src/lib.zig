@@ -1,29 +1,38 @@
 // SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
 // SPDX-License-Identifier: MPL-2.0
 
-//! This package is the entry-point for the library.
+//! This package is the entry-point for the exported library.
 
-pub const file = @import("lib/helpers.zig").file;
-pub const hash = @import("lib/helpers.zig").hash;
+// Utilities
 
-pub const model = @import("lib/model.zig");
-pub const index = @import("lib/index.zig");
-pub const storage = @import("lib/storage.zig");
+pub const fs = @import("lib/model/util/fs.zig");
+pub const hash = @import("lib/model/util/hash.zig");
 
-pub const LooseObject = @import("lib/LooseObject.zig");
-pub const ObjectStore = @import("lib/object_store.zig").ObjectStore;
+// Data Model
+
+pub const Identity = @import("lib/model/signature.zig").Identity;
+pub const Signature = @import("lib/model/signature.zig").Signature;
+pub const Time = @import("lib/model/signature.zig").Time;
+
+pub const Blob = @import("lib/model/blob.zig").Blob;
+pub const Tree = @import("lib/model/tree.zig").Tree;
+pub const Commit = @import("lib/model/commit.zig").Commit;
+pub const Tag = @import("lib/model/tag.zig").Tag;
+
+// Index
+
+pub const SparseDirectory = @import("lib/model/index.zig").SparseDirectory;
+pub const UnknownExtension = @import("lib/model/index.zig").UnknownExtension;
+
+// Repository
+
 pub const Repository = @import("lib/repository.zig").Repository;
+pub const SetupOptions = @import("lib/repository.zig").SetupOptions;
 
-const objects = @import("lib/objects.zig");
-pub const hashObject = objects.hashObject;
-pub const readObject = objects.readObject;
-pub const readTypeAndSize = objects.readTypeAndSize;
-pub const readEncodedData = objects.readEncodedData;
+// Business Logic
 
-const files = @import("lib/files.zig");
-pub const File = files.File;
-pub const ListFilesOptions = files.ListFilesOptions;
-pub const listFiles = files.listFiles;
+pub const file = @import("lib/file.zig");
+pub const object = @import("lib/object.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

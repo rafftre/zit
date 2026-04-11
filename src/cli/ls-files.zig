@@ -6,7 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
-const GitRepository = zit.storage.GitRepositorySha1;
+const Sha1 = zit.hash.Sha1;
 
 /// The ls-files command.
 pub const command = Command{
@@ -89,10 +89,8 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, args: Command.Arguments) !void {
-    const out = std.io.getStdOut().writer();
-
-    var opts: zit.ListFilesOptions = .{
+fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+    var opts: zit.file.ListOptions = .{
         .cached = args.parsed.get("cached") != null,
         .others = args.parsed.get("others") != null,
         .stage_info = args.parsed.get("stage") != null,
@@ -103,7 +101,7 @@ fn run(allocator: Allocator, args: Command.Arguments) !void {
     };
     const zero_terminated = args.parsed.get("z") != null;
 
-    const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+    var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
         error.GitDirNotFound => {
             try out.print(
                 "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -113,21 +111,21 @@ fn run(allocator: Allocator, args: Command.Arguments) !void {
         },
         else => return err,
     };
-    defer repository.close(allocator);
+    defer repo.deinit(allocator);
 
-    const files = try zit.listFiles(allocator, repository.repo, &opts);
+    var files = try zit.file.list(allocator, Sha1, repo, &opts);
     defer {
-        for (files.items) |f| {
-            allocator.free(f.path);
+        for (files.items) |*f| {
+            f.deinit(allocator);
         }
-        files.deinit();
+        files.deinit(allocator);
     }
 
     for (files.items) |file| {
         if (opts.stage_info and file.merge_stage != null) {
-            try out.print("{any} {any} {d}\t{s}", .{
-                file.mode,
-                file.object_id,
+            try out.print("{f} {f} {d}\t{s}", .{
+                file.mode.?,
+                file.object_id.?,
                 @intFromEnum(file.merge_stage.?),
                 file.path,
             });

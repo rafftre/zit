@@ -4,7 +4,6 @@
 //! Hashing functions and binary to hex string conversions.
 
 const std = @import("std");
-const FixedBufferAllocator = std.heap.FixedBufferAllocator;
 
 pub const Sha1 = Hasher(std.crypto.hash.Sha1);
 pub const Sha256 = Hasher(std.crypto.hash.sha2.Sha256);
@@ -162,7 +161,7 @@ pub fn parseHex(hex: []const u8, out: []u8) !void {
     }
 
     var buf = [_]u8{0} ** 32;
-    var fba = FixedBufferAllocator.init(&buf);
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
     const allocator = fba.allocator();
 
     const res = try allocator.alloc(u8, hash_size);
@@ -229,27 +228,25 @@ test "conversion errors" {
 }
 
 /// Formats an hash as an hexadecimal string to `writer`.
-pub fn formatAsHex(hash: []u8, writer: anytype) !void {
+pub fn formatAsHex(hash: []u8, writer: *std.io.Writer) !void {
     for (hash) |byte| {
         _ = try writer.print("{x:0>2}", .{byte});
     }
 }
 
 test "format" {
-    const allocator = std.testing.allocator;
-
     const test_chars = "0123456789abcdeffedcba98765432100f1e2d3c";
     const test_hash = @constCast(&[_]u8{
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc,
         0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
     });
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
+    var buf: [Sha1.hash_size * 2]u8 = undefined;
+    var w = std.io.Writer.fixed(&buf);
 
-    try formatAsHex(test_hash, buf.writer());
+    try formatAsHex(test_hash, &w);
 
-    try std.testing.expectEqualSlices(u8, test_chars, buf.items);
+    try std.testing.expectEqualStrings(test_chars, w.buffered());
 }
 
 /// Returns whether the hash starts with `prefix`.

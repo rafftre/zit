@@ -6,7 +6,7 @@ const std = @import("std");
 
 const Allocator = std.mem.Allocator;
 
-const cli = @import("cli/root.zig");
+const cli = @import("cli.zig");
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
@@ -25,16 +25,26 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
+    const stdout_file: std.fs.File = .stdout();
+    defer stdout_file.close();
+
+    var out_buf: [1024]u8 = undefined;
+    var stdout_w = stdout_file.writer(&out_buf);
+    const stdout = &stdout_w.interface;
+
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
     if (args.len < 2) {
-        try cli.printUsage(std.io.getStdOut().writer());
+        try cli.printUsage(stdout);
+        try stdout.flush();
         return;
     }
 
     const command_name = args[1];
     const command_args = args[2..];
 
-    try cli.runCommand(gpa, command_name, command_args);
+    try cli.runCommand(gpa, stdout, command_name, command_args);
+
+    try stdout.flush();
 }

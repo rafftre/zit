@@ -6,7 +6,7 @@
 const std = @import("std");
 
 /// File types.
-pub const Type = enum(u4) {
+pub const FileType = enum(u4) {
     indeterminate = 0,
     directory = 0b100, //       4 (0o4 )
     regular_file = 0b1000, //   8 (0o10)
@@ -14,95 +14,39 @@ pub const Type = enum(u4) {
     gitlink = 0b1110, //       14 (0o16)
 
     /// Returns the type for the given integer.
-    pub inline fn of(num: u4) Type {
-        return std.meta.intToEnum(Type, num) catch .indeterminate;
+    pub fn of(num: u4) FileType {
+        return std.meta.intToEnum(FileType, num) catch .indeterminate;
     }
 
     /// Returns the type for the given string (representing an octal number).
-    pub fn parse(octal: []const u8) !Type {
+    pub fn parse(octal: []const u8) !FileType {
         const n = try std.fmt.parseInt(u4, octal, 8);
-        return std.meta.intToEnum(Type, n) catch .indeterminate;
-    }
-
-    /// Formatting method for use with `std.fmt.format`.
-    ///
-    /// The supported formats are:
-    /// - 'b' for binary output
-    /// - 'o' for octal string
-    /// - Any other value will result in a descriptive string (the tag name).
-    ///
-    /// Options are ignored.
-    pub fn format(
-        self: Type,
-        comptime fmt: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        if (std.mem.eql(u8, fmt, "b")) {
-            try writer.print("{b:0>4}", .{@intFromEnum(self)});
-        } else if (std.mem.eql(u8, fmt, "o")) {
-            try writer.print("{o:0>2}", .{@intFromEnum(self)});
-        } else {
-            try writer.print("{s}", .{@tagName(self)});
-        }
+        return std.meta.intToEnum(FileType, n) catch .indeterminate;
     }
 };
 
-test "type from integer" {
-    try std.testing.expect(Type.of(4) == .directory);
-    try std.testing.expect(Type.of(8) == .regular_file);
-    try std.testing.expect(Type.of(10) == .symbolic_link);
-    try std.testing.expect(Type.of(14) == .gitlink);
-    try std.testing.expect(Type.of(0) == .indeterminate);
-    try std.testing.expect(Type.of(1) == .indeterminate);
-    try std.testing.expect(Type.of(15) == .indeterminate);
+test "file type from integer" {
+    try std.testing.expect(FileType.of(4) == .directory);
+    try std.testing.expect(FileType.of(8) == .regular_file);
+    try std.testing.expect(FileType.of(10) == .symbolic_link);
+    try std.testing.expect(FileType.of(14) == .gitlink);
+    try std.testing.expect(FileType.of(0) == .indeterminate);
+    try std.testing.expect(FileType.of(1) == .indeterminate);
+    try std.testing.expect(FileType.of(15) == .indeterminate);
 }
 
-test "parse type string" {
-    try std.testing.expect(try Type.parse("04") == .directory);
-    try std.testing.expect(try Type.parse("10") == .regular_file);
-    try std.testing.expect(try Type.parse("12") == .symbolic_link);
-    try std.testing.expect(try Type.parse("16") == .gitlink);
-    try std.testing.expect(try Type.parse("0") == .indeterminate);
-    try std.testing.expect(try Type.parse("1") == .indeterminate);
-    try std.testing.expect(try Type.parse("17") == .indeterminate);
+test "parse file type string" {
+    try std.testing.expect(try FileType.parse("04") == .directory);
+    try std.testing.expect(try FileType.parse("10") == .regular_file);
+    try std.testing.expect(try FileType.parse("12") == .symbolic_link);
+    try std.testing.expect(try FileType.parse("16") == .gitlink);
+    try std.testing.expect(try FileType.parse("0") == .indeterminate);
+    try std.testing.expect(try FileType.parse("1") == .indeterminate);
+    try std.testing.expect(try FileType.parse("17") == .indeterminate);
 
-    try std.testing.expectError(error.Overflow, Type.parse("20"));
-    try std.testing.expectError(error.InvalidCharacter, Type.parse(""));
-    try std.testing.expectError(error.InvalidCharacter, Type.parse("abcdef"));
-}
-
-test "format type" {
-    const allocator = std.testing.allocator;
-
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
-
-    const test_cases = [_]struct { Type, []const u8, []const u8 }{
-        .{ Type.indeterminate, "{any}", "indeterminate" },
-        .{ Type.directory, "{any}", "directory" },
-        .{ Type.regular_file, "{any}", "regular_file" },
-        .{ Type.symbolic_link, "{any}", "symbolic_link" },
-        .{ Type.gitlink, "{any}", "gitlink" },
-        .{ Type.indeterminate, "{b}", "0000" },
-        .{ Type.directory, "{b}", "0100" },
-        .{ Type.regular_file, "{b}", "1000" },
-        .{ Type.symbolic_link, "{b}", "1010" },
-        .{ Type.gitlink, "{b}", "1110" },
-        .{ Type.indeterminate, "{o}", "00" },
-        .{ Type.directory, "{o}", "04" },
-        .{ Type.regular_file, "{o}", "10" },
-        .{ Type.symbolic_link, "{o}", "12" },
-        .{ Type.gitlink, "{o}", "16" },
-    };
-
-    inline for (test_cases) |c| {
-        const val, const fmt, const expected = c;
-
-        buf.clearRetainingCapacity();
-        try std.fmt.format(buf.writer(), fmt, .{val});
-        try std.testing.expectEqualSlices(u8, expected, buf.items);
-    }
+    try std.testing.expectError(error.Overflow, FileType.parse("20"));
+    try std.testing.expectError(error.InvalidCharacter, FileType.parse(""));
+    try std.testing.expectError(error.InvalidCharacter, FileType.parse("abcdef"));
 }
 
 /// Rights to access files and directories for read (r), write (w), and execute (x) operations.
@@ -142,37 +86,18 @@ pub const AccessRights = packed struct(u3) {
     }
 
     /// Returns `true` if the access rights are equal.
-    pub inline fn eql(a: *const AccessRights, b: *const AccessRights) bool {
+    pub fn eql(a: *const AccessRights, b: *const AccessRights) bool {
         return a.read == b.read and a.write == b.write and a.execute == b.execute;
     }
 
-    /// Formatting method for use with `std.fmt.format`.
-    ///
-    /// The supported formats are:
-    /// - 'b' for binary output
-    /// - 'o' for octal string
-    /// - Any other value will result in a string in the Unix format (i.e. "rwx").
-    ///
-    /// Options are ignored.
-    pub fn format(
-        self: AccessRights,
-        comptime fmt: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        if (std.mem.eql(u8, fmt, "b")) {
-            const bits: u3 = @bitCast(self);
-            try writer.print("{b:0>3}", .{bits});
-        } else if (std.mem.eql(u8, fmt, "o")) {
-            const bits: u3 = @bitCast(self);
-            try writer.print("{o}", .{bits});
-        } else {
-            try writer.print("{s}{s}{s}", .{
-                if (self.read) "r" else "-",
-                if (self.write) "w" else "-",
-                if (self.execute) "x" else "-",
-            });
-        }
+    /// Formatting method for use with `std.io.Writer.print`.
+    /// Outputs access rights as a string in the Unix format (i.e. "rwx").
+    pub fn format(self: *const AccessRights, writer: *std.io.Writer) !void {
+        try writer.print("{s}{s}{s}", .{
+            if (self.read) "r" else "-",
+            if (self.write) "w" else "-",
+            if (self.execute) "x" else "-",
+        });
     }
 };
 
@@ -234,41 +159,25 @@ test "parse access rights string" {
 test "format access rights" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
-
-    const test_cases = [_]struct { AccessRights, []const u8, []const u8 }{
-        .{ AccessRights{}, "{any}", "---" },
-        .{ AccessRights{ .execute = true }, "{any}", "--x" },
-        .{ AccessRights{ .write = true }, "{any}", "-w-" },
-        .{ AccessRights{ .read = true }, "{any}", "r--" },
-        .{ AccessRights{ .write = true, .execute = true }, "{any}", "-wx" },
-        .{ AccessRights{ .read = true, .execute = true }, "{any}", "r-x" },
-        .{ AccessRights{ .read = true, .write = true }, "{any}", "rw-" },
-        .{ AccessRights{ .read = true, .write = true, .execute = true }, "{any}", "rwx" },
-        .{ AccessRights{}, "{b}", "000" },
-        .{ AccessRights{ .execute = true }, "{b}", "001" },
-        .{ AccessRights{ .write = true }, "{b}", "010" },
-        .{ AccessRights{ .read = true }, "{b}", "100" },
-        .{ AccessRights{ .write = true, .execute = true }, "{b}", "011" },
-        .{ AccessRights{ .read = true, .execute = true }, "{b}", "101" },
-        .{ AccessRights{ .read = true, .write = true }, "{b}", "110" },
-        .{ AccessRights{ .read = true, .write = true, .execute = true }, "{b}", "111" },
-        .{ AccessRights{}, "{o}", "0" },
-        .{ AccessRights{ .execute = true }, "{o}", "1" },
-        .{ AccessRights{ .write = true }, "{o}", "2" },
-        .{ AccessRights{ .read = true }, "{o}", "4" },
-        .{ AccessRights{ .write = true, .execute = true }, "{o}", "3" },
-        .{ AccessRights{ .read = true, .execute = true }, "{o}", "5" },
-        .{ AccessRights{ .read = true, .write = true }, "{o}", "6" },
-        .{ AccessRights{ .read = true, .write = true, .execute = true }, "{o}", "7" },
+    const test_cases = [_]struct { AccessRights, []const u8 }{
+        .{ AccessRights{}, "---" },
+        .{ AccessRights{ .execute = true }, "--x" },
+        .{ AccessRights{ .write = true }, "-w-" },
+        .{ AccessRights{ .read = true }, "r--" },
+        .{ AccessRights{ .write = true, .execute = true }, "-wx" },
+        .{ AccessRights{ .read = true, .execute = true }, "r-x" },
+        .{ AccessRights{ .read = true, .write = true }, "rw-" },
+        .{ AccessRights{ .read = true, .write = true, .execute = true }, "rwx" },
     };
 
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+
     inline for (test_cases) |c| {
-        const val, const fmt, const expected = c;
+        const val, const expected = c;
 
         buf.clearRetainingCapacity();
-        try std.fmt.format(buf.writer(), fmt, .{val});
+        try buf.print(allocator, "{f}", .{val});
         try std.testing.expectEqualSlices(u8, expected, buf.items);
     }
 }
@@ -287,7 +196,7 @@ pub const Permissions = packed struct(u9) {
     }
 
     /// Returns `true` if the permissions are equal.
-    pub inline fn eql(a: *const Permissions, b: *const Permissions) bool {
+    pub fn eql(a: *const Permissions, b: *const Permissions) bool {
         const a_bits: u9 = @bitCast(a.*);
         const b_bits: u9 = @bitCast(b.*);
         return a_bits == b_bits;
@@ -306,29 +215,11 @@ pub const Permissions = packed struct(u9) {
         };
     }
 
-    /// Formatting method for use with `std.fmt.format`.
-    ///
-    /// The supported formats are:
-    /// - 'b' for binary output
-    /// - 'o' for octal string
-    /// - Any other value will result in a string in the Unix format (i.e. "rwxrwxrwx").
-    ///
-    /// Options are ignored.
-    pub fn format(
-        self: Permissions,
-        comptime fmt: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        if (std.mem.eql(u8, fmt, "b")) {
-            const bits: u9 = @bitCast(self);
-            try writer.print("{b:0>9}", .{bits});
-        } else if (std.mem.eql(u8, fmt, "o")) {
-            const bits: u9 = @bitCast(self);
-            try writer.print("{o:0>3}", .{bits});
-        } else {
-            try writer.print("{any}{any}{any}", .{ self.user, self.group, self.others });
-        }
+    /// Formatting method for use with `std.io.Writer.print`.
+    /// Outputs content as a string.
+    /// Outputs permissions as a string in the Unix format (i.e. "rwxrwxrwx").
+    pub fn format(self: *const Permissions, writer: *std.io.Writer) !void {
+        try writer.print("{f}{f}{f}", .{ self.user, self.group, self.others });
     }
 };
 
@@ -406,20 +297,16 @@ test "parse permissions string" {
 test "format permissions" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
-
-    const test_cases = [_]struct { Permissions, []const u8, []const u8 }{
-        .{ Permissions{}, "{any}", "---------" },
-        .{ Permissions{ .others = .{ .read = true, .write = true, .execute = true } }, "{any}", "------rwx" },
-        .{ Permissions{ .group = .{ .read = true, .write = true, .execute = true } }, "{any}", "---rwx---" },
-        .{ Permissions{ .user = .{ .read = true, .write = true, .execute = true } }, "{any}", "rwx------" },
+    const test_cases = [_]struct { Permissions, []const u8 }{
+        .{ Permissions{}, "---------" },
+        .{ Permissions{ .others = .{ .read = true, .write = true, .execute = true } }, "------rwx" },
+        .{ Permissions{ .group = .{ .read = true, .write = true, .execute = true } }, "---rwx---" },
+        .{ Permissions{ .user = .{ .read = true, .write = true, .execute = true } }, "rwx------" },
         .{
             Permissions{
                 .group = .{ .read = true, .write = true, .execute = true },
                 .others = .{ .read = true, .write = true, .execute = true },
             },
-            "{any}",
             "---rwxrwx",
         },
         .{
@@ -427,7 +314,6 @@ test "format permissions" {
                 .user = .{ .read = true, .write = true, .execute = true },
                 .others = .{ .read = true, .write = true, .execute = true },
             },
-            "{any}",
             "rwx---rwx",
         },
         .{
@@ -435,7 +321,6 @@ test "format permissions" {
                 .user = .{ .read = true, .write = true, .execute = true },
                 .group = .{ .read = true, .write = true, .execute = true },
             },
-            "{any}",
             "rwxrwx---",
         },
         .{
@@ -444,16 +329,18 @@ test "format permissions" {
                 .group = .{ .read = true, .write = true, .execute = true },
                 .others = .{ .read = true, .write = true, .execute = true },
             },
-            "{any}",
             "rwxrwxrwx",
         },
     };
 
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+
     inline for (test_cases) |c| {
-        const val, const fmt, const expected = c;
+        const val, const expected = c;
 
         buf.clearRetainingCapacity();
-        try std.fmt.format(buf.writer(), fmt, .{val});
+        try buf.print(allocator, "{f}", .{val});
         try std.testing.expectEqualSlices(u8, expected, buf.items);
     }
 }
@@ -463,31 +350,31 @@ test "format permissions" {
 /// - 4 bits file type,
 /// - 3 null bits (0),
 /// - 9 bits Unix permissions.
-pub const Mode = packed struct(u16) {
+pub const FileMode = packed struct(u16) {
     // Note: field order is the reverse of the bit layout
     permissions: Permissions = .{},
     nil: AccessRights = .{},
-    type: Type = .indeterminate,
+    type: FileType = .indeterminate,
 
     /// Returns the mode for the given value.
-    pub fn of(bits: u16) Mode {
+    pub fn of(bits: u16) FileMode {
         return @bitCast(bits);
     }
 
     /// Returns the integer value for this mode.
-    pub fn toInt(self: Mode) u16 {
+    pub fn toInt(self: FileMode) u16 {
         return @bitCast(self);
     }
 
     /// Returns `true` if the modes are equal.
-    pub inline fn eql(a: *const Mode, b: *const Mode) bool {
+    pub fn eql(a: *const FileMode, b: *const FileMode) bool {
         const a_bits: u16 = @bitCast(a.*);
         const b_bits: u16 = @bitCast(b.*);
         return a_bits == b_bits;
     }
 
     /// Returns the mode for the given string (representing an octal number).
-    pub fn parse(s: []const u8) !Mode {
+    pub fn parse(s: []const u8) !FileMode {
         var type_str: []const u8 = undefined;
         var perm_str: []const u8 = undefined;
 
@@ -504,27 +391,25 @@ pub const Mode = packed struct(u16) {
         const perm_num = try std.fmt.parseInt(u9, perm_str, 8);
 
         return .{
-            .type = try Type.parse(type_str),
+            .type = try FileType.parse(type_str),
             .permissions = Permissions.of(perm_num),
         };
     }
 
-    /// Formatting method for use with `std.fmt.format`.
-    /// Format and options are ignored.
-    pub fn format(
-        self: Mode,
-        comptime _: []const u8,
-        _: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        try writer.print("{o}{o}{o}", .{ self.type, self.nil, self.permissions });
+    /// Formatting method for use with `std.io.Writer.print`.
+    /// Outputs content as a string.
+    /// Outputs file mode as an integer (i.e. "160764").
+    pub fn format(self: *const FileMode, writer: *std.io.Writer) !void {
+        const nil_bits: u3 = @bitCast(self.nil);
+        const perm_bits: u9 = @bitCast(self.permissions);
+        try writer.print("{o:0>2}{o}{o:0>3}", .{ self.type, nil_bits, perm_bits });
     }
 };
 
-test "mode from an to integer" {
-    const test_cases = [_]struct { u16, Mode }{
-        .{ 0, Mode{} },
-        .{ 0o160764, Mode{
+test "file mode from an to integer" {
+    const test_cases = [_]struct { u16, FileMode }{
+        .{ 0, FileMode{} },
+        .{ 0o160764, FileMode{
             .type = .gitlink,
             .permissions = Permissions{
                 .user = .{ .read = true, .write = true, .execute = true },
@@ -536,7 +421,7 @@ test "mode from an to integer" {
 
     for (test_cases) |c| {
         const bits, const expected = c;
-        const mode = Mode.of(bits);
+        const mode = FileMode.of(bits);
         const re = mode.toInt();
 
         try std.testing.expect(mode.eql(&expected));
@@ -544,10 +429,10 @@ test "mode from an to integer" {
     }
 }
 
-test "parse mode string" {
-    const test_cases = [_]struct { []const u8, Mode }{
-        .{ "000000", Mode{} },
-        .{ "40540", Mode{
+test "parse file mode string" {
+    const test_cases = [_]struct { []const u8, FileMode }{
+        .{ "000000", FileMode{} },
+        .{ "40540", FileMode{
             .type = .directory,
             .permissions = Permissions{
                 .user = .{ .read = true, .execute = true },
@@ -555,7 +440,7 @@ test "parse mode string" {
                 .others = .{},
             },
         } },
-        .{ "160764", Mode{
+        .{ "160764", FileMode{
             .type = .gitlink,
             .permissions = Permissions{
                 .user = .{ .read = true, .write = true, .execute = true },
@@ -567,48 +452,48 @@ test "parse mode string" {
 
     for (test_cases) |c| {
         const s, const expected = c;
-        const mode = try Mode.parse(s);
+        const mode = try FileMode.parse(s);
 
         try std.testing.expect(mode.eql(&expected));
     }
 
     // errors
-    try std.testing.expectError(error.InvalidFormat, Mode.parse(""));
-    try std.testing.expectError(error.InvalidFormat, Mode.parse("0"));
-    try std.testing.expectError(error.InvalidFormat, Mode.parse("0160764"));
+    try std.testing.expectError(error.InvalidFormat, FileMode.parse(""));
+    try std.testing.expectError(error.InvalidFormat, FileMode.parse("0"));
+    try std.testing.expectError(error.InvalidFormat, FileMode.parse("0160764"));
 }
 
-test "format mode" {
+test "format file mode" {
     const allocator = std.testing.allocator;
 
-    var buf = std.ArrayList(u8).init(allocator);
-    defer buf.deinit();
-
-    const test_cases = [_]struct { Mode, []const u8, []const u8 }{
-        .{ Mode{}, "{any}", "000000" },
-        .{ Mode{
+    const test_cases = [_]struct { FileMode, []const u8 }{
+        .{ FileMode{}, "000000" },
+        .{ FileMode{
             .type = .directory,
             .permissions = Permissions{
                 .user = .{ .read = true, .execute = true },
                 .group = .{ .read = true },
                 .others = .{},
             },
-        }, "{any}", "040540" },
-        .{ Mode{
+        }, "040540" },
+        .{ FileMode{
             .type = .gitlink,
             .permissions = Permissions{
                 .user = .{ .read = true, .write = true, .execute = true },
                 .group = .{ .read = true, .write = true },
                 .others = .{ .read = true },
             },
-        }, "{any}", "160764" },
+        }, "160764" },
     };
 
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
+
     inline for (test_cases) |c| {
-        const val, const fmt, const expected = c;
+        const val, const expected = c;
 
         buf.clearRetainingCapacity();
-        try std.fmt.format(buf.writer(), fmt, .{val});
+        try buf.print(allocator, "{f}", .{val});
         try std.testing.expectEqualSlices(u8, expected, buf.items);
     }
 }

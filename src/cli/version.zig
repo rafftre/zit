@@ -16,7 +16,6 @@ pub const command = Command{
     .description = "Show the version of the application.",
 };
 
-fn run(_: Allocator, _: Command.Arguments) !void {
-    const out = std.io.getStdOut().writer();
+fn run(_: Allocator, out: *std.Io.Writer, _: Command.Arguments) !void {
     try out.print("{s} version {s}\n", .{ build_options.app_name, build_options.app_version });
 }

@@ -6,7 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
-const GitRepository = zit.storage.GitRepositorySha1;
+const Sha1 = zit.hash.Sha1;
 
 /// The hash-object command.
 pub const command = Command{
@@ -24,7 +24,7 @@ pub const command = Command{
     \\The file content can be entered directly from stdin instead of being read
     \\from a file.
     ,
-    .usage_lines = "[-t <type>] [-w] [--stdin [--literally]] <file>...",
+    .usage_lines = "[-t <type>] [-w] [--stdin] <file>...",
     .parameters = &[_]Command.Parameter{
         .{ .option = .{
             .short = 't',
@@ -39,14 +39,6 @@ pub const command = Command{
             .long = "stdin",
             .description = "Read the object from standard input instead of from a file.",
         } },
-        .{ .option = .{
-            .long = "literally",
-            .description =
-            \\Allow --stdin to hash anything into a loose object which might not
-            \\otherwise pass standard object parsing.
-            \\Useful for stress-testing or reproducing corrupt or bogus objects.
-            ,
-        } },
         .{ .positional = .{
             .name = "file",
             .description = "The file to read from (there may be multiple files).",
@@ -54,15 +46,12 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, args: Command.Arguments) !void {
-    const out = std.io.getStdOut().writer();
-
-    const type_str = args.parsed.get("t") orelse "blob";
+fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+    const type_str = args.parsed.get("t");
     const persist = args.parsed.get("w") != null;
     const use_stdin = args.parsed.get("stdin") != null;
-    const literally = args.parsed.get("literally") != null;
 
-    const repository = GitRepository.open(allocator, null) catch |err| switch (err) {
+    var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
         error.GitDirNotFound => {
             try out.print(
                 "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -72,27 +61,49 @@ fn run(allocator: Allocator, args: Command.Arguments) !void {
         },
         else => return err,
     };
-    defer repository.close(allocator);
+    defer repo.deinit(allocator);
+
+    const obj_type = zit.object.Type.parse(type_str) orelse .blob;
 
     if (use_stdin) {
-        const in = std.io.getStdIn().reader();
+        const stdin_file: std.fs.File = .stdin();
+        defer stdin_file.close();
 
-        const oid = try zit.hashObject(allocator, repository.store, in, type_str, !literally, persist);
-        defer allocator.free(oid);
+        var in_buf: [1024]u8 = undefined;
+        var stdin_r = stdin_file.readerStreaming(&in_buf);
+        const stdin = &stdin_r.interface;
 
-        try out.print("{s}\n", .{oid});
+        // FIXME: does not listen for user input
+        var obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, persist);
+        errdefer obj_id.deinit(allocator);
+
+        try out.print("{f}\n", .{obj_id});
     }
 
     for (args.positional.items) |path| {
-        var file = std.fs.cwd().openFile(path, .{}) catch |err| {
-            try std.io.getStdErr().writer().print("Failed to open file: {s}\n", .{@errorName(err)});
+        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+            // TODO: move stderr to main?
+            const stderr_file: std.fs.File = .stderr();
+            defer stderr_file.close();
+
+            var err_buf: [1024]u8 = undefined;
+            var stderr_w = stderr_file.writer(&err_buf);
+            const stderr = &stderr_w.interface;
+
+            try stderr.print("Failed to open file: {s}\n", .{@errorName(err)});
+            try stderr.flush();
+
             continue;
         };
         defer file.close();
 
-        const oid = try zit.hashObject(allocator, repository.store, file.reader(), type_str, true, persist);
-        defer allocator.free(oid);
+        var file_buf: [4 * 1024]u8 = undefined;
+        var file_r = file.readerStreaming(&file_buf);
+        const reader = &file_r.interface;
 
-        try out.print("{s}\n", .{oid});
+        var obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, persist);
+        errdefer obj_id.deinit(allocator);
+
+        try out.print("{f}\n", .{obj_id});
     }
 }
