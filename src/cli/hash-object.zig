@@ -24,7 +24,7 @@ pub const command = Command{
     \\The file content can be entered directly from stdin instead of being read
     \\from a file.
     ,
-    .usage_lines = "[-t <type>] [-w] [--stdin] <file>...",
+    .usage_lines = "[-t <type>] [-w] [--stdin [--literally]] <file>...",
     .parameters = &[_]Command.Parameter{
         .{ .option = .{
             .short = 't',
@@ -39,6 +39,14 @@ pub const command = Command{
             .long = "stdin",
             .description = "Read the object from standard input instead of from a file.",
         } },
+        .{ .option = .{
+            .long = "literally",
+            .description =
+            \\Allow --stdin to hash anything into a loose object which might not
+            \\otherwise pass standard object parsing.
+            \\Useful for stress-testing or reproducing corrupt or bogus objects.
+            ,
+        } },
         .{ .positional = .{
             .name = "file",
             .description = "The file to read from (there may be multiple files).",
@@ -48,20 +56,27 @@ pub const command = Command{
 
 fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
     const type_str = args.parsed.get("t");
-    const persist = args.parsed.get("w") != null;
     const use_stdin = args.parsed.get("stdin") != null;
+    const literally = args.parsed.get("literally") != null;
 
-    var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
-        error.GitDirNotFound => {
-            try out.print(
-                "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
-                .{},
-            );
-            return;
-        },
-        else => return err,
-    };
-    defer repo.deinit(allocator);
+    var repo: ?zit.Repository(Sha1) = null;
+    if (args.parsed.get("w") != null) { // persist
+        repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
+            error.GitDirNotFound => {
+                try out.print(
+                    "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                    .{},
+                );
+                return;
+            },
+            else => return err,
+        };
+    }
+    defer {
+        if (repo) |*r| {
+            r.deinit(allocator);
+        }
+    }
 
     const obj_type = zit.object.Type.parse(type_str) orelse .blob;
 
@@ -73,9 +88,8 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         var stdin_r = stdin_file.readerStreaming(&in_buf);
         const stdin = &stdin_r.interface;
 
-        // FIXME: does not listen for user input
-        var obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, persist);
-        errdefer obj_id.deinit(allocator);
+        var obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, literally);
+        defer obj_id.deinit(allocator);
 
         try out.print("{f}\n", .{obj_id});
     }
@@ -101,8 +115,8 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         var file_r = file.readerStreaming(&file_buf);
         const reader = &file_r.interface;
 
-        var obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, persist);
-        errdefer obj_id.deinit(allocator);
+        var obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, literally);
+        defer obj_id.deinit(allocator);
 
         try out.print("{f}\n", .{obj_id});
     }

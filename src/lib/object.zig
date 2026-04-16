@@ -27,10 +27,16 @@ pub fn create(
     /// `true` means the object must pass standard object parsing otherwise an error is returned.
     check_format: bool,
 ) !*Repository(Hasher).Object.Id {
-    const obj: Repository(Hasher).LooseObject = .{
+    var bytes: std.Io.Writer.Allocating = .init(allocator);
+    defer bytes.deinit();
+
+    _ = try reader.streamRemaining(&bytes.writer);
+
+    var obj: Repository(Hasher).LooseObject = .{
         .object_type = obj_type,
-        .content = reader.buffered(),
+        .content = try bytes.toOwnedSlice(),
     };
+    defer obj.deinit(allocator);
 
     const encoded_obj = try obj.encode(allocator);
     defer allocator.free(encoded_obj);

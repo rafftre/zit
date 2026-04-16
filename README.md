@@ -137,8 +137,7 @@ Each level corresponds to a Zig package with the following structure (from highe
 - _Sparse directory_ is the only supported index extension.
 
 ### Open points after migration to Zig 0.15
-1. The `hash-object` command with `--stdin` option does not work.
-2. The zlib compression (_deflate_) is ported from next version of Zig in the module `lib/model/newflate` and should be removed with a future migration to Zig 0.16.
+1. The zlib compression (_deflate_) is ported from next version of Zig in the module `lib/model/newflate` and should be removed with a future migration to Zig 0.16.
 
 
 ## Contributing
