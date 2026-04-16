@@ -11,7 +11,7 @@ const Sha1 = zit.hash.Sha1;
 
 /// The cat-file command.
 pub const command = Command{
-    .run = run,
+    .run = handler,
     .name = "cat-file",
     .brief = "Provide contents or type and size information for objects",
     .description =
@@ -58,7 +58,7 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
     const allow_unknown_type = args.parsed.get("allow-unknown-type") != null;
     const check_exists = args.parsed.get("e") != null;
     const pretty_print = args.parsed.get("p") != null;
@@ -67,8 +67,8 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
 
     var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
         error.GitDirNotFound => {
-            try out.print(
-                "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+            try stderr.print(
+                "Repository not found (cannot find .git in current directory or any of the parents).\n",
                 .{},
             );
             return;
@@ -82,7 +82,7 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         const obj_name = args.positional.items[1];
 
         if (check_exists or pretty_print or get_size or get_type) {
-            try out.print("Error: Too many arguments.\n", .{});
+            try stderr.print("Too many arguments.\n", .{});
             return;
         }
 
@@ -94,7 +94,7 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         var loose_obj = try zit.object.read(allocator, Sha1, repo, obj_id, obj_type);
         defer loose_obj.deinit(allocator);
 
-        try out.print("{s}", .{loose_obj.content});
+        try stdout.print("{s}", .{loose_obj.content});
     } else if (args.positional.items.len > 0) {
         const obj_name = args.positional.items[0];
 
@@ -102,24 +102,24 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         defer obj_id.deinit(allocator);
 
         if (eptsCount(check_exists, pretty_print, get_size, get_type) > 1) {
-            try out.print("Error: Selected flags are incompatible.\n", .{});
+            try stderr.print("Selected flags are incompatible.\n", .{});
             return;
         }
 
         if (check_exists) {
             if (allow_unknown_type) {
-                try out.print("Error: --allow-unknown-type must be used with -s or -t flags.\n", .{});
+                try stderr.print("--allow-unknown-type must be used with -s or -t flags.\n", .{});
                 return;
             }
 
             var loose_obj = zit.object.read(allocator, Sha1, repo, obj_id, null) catch |err| switch (err) {
-                error.FileNotFound => cli.fail(out),
+                error.FileNotFound => cli.fail(stdout, stderr),
                 else => return err,
             };
             defer loose_obj.deinit(allocator);
         } else if (pretty_print) {
             if (allow_unknown_type) {
-                try out.print("Error: --allow-unknown-type must be used with -s or -t flags.\n", .{});
+                try stderr.print("--allow-unknown-type must be used with -s or -t flags.\n", .{});
                 return;
             }
 
@@ -129,16 +129,16 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
             var obj: zit.Repository(Sha1).Object = try .deserialize(allocator, &loose_obj);
             defer obj.deinit(allocator);
 
-            try out.print("{f}", .{obj});
+            try stdout.print("{f}", .{obj});
         } else if (get_size) {
             const obj_size = try zit.object.getSize(allocator, Sha1, repo, obj_id, allow_unknown_type);
-            try out.print("{d}\n", .{obj_size});
+            try stdout.print("{d}\n", .{obj_size});
         } else if (get_type) {
             const obj_type = try zit.object.getType(allocator, Sha1, repo, obj_id, allow_unknown_type);
-            try out.print("{s}\n", .{obj_type.toString() orelse "unknown"});
+            try stdout.print("{s}\n", .{obj_type.toString() orelse "unknown"});
         }
     } else {
-        try out.print("Error: <object> is required with -e, -p, -s or -t flags.\n", .{});
+        try stderr.print("<object> is required with -e, -p, -s or -t flags.\n", .{});
     }
 }
 

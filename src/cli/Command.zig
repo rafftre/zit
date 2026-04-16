@@ -11,7 +11,13 @@ const build_options = @import("build_options");
 const Allocator = std.mem.Allocator;
 const usage_prefix = "  ";
 
-run: *const fn (allocator: Allocator, out: *std.Io.Writer, args: Arguments) anyerror!void,
+run: *const fn (
+    allocator: Allocator,
+    stdout: *std.Io.Writer,
+    stderr: *std.Io.Writer,
+    args: Arguments,
+) anyerror!void,
+
 name: []const u8,
 brief: []const u8,
 description: []const u8,
@@ -111,7 +117,7 @@ pub const Option = struct {
     require_value: bool = false,
 
     /// Checks if this option has a short name equal to `name`.
-    inline fn isShort(self: Option, name: u8) bool {
+    fn isShort(self: Option, name: u8) bool {
         if (self.short) |opt_short| {
             return opt_short == name;
         }
@@ -119,7 +125,7 @@ pub const Option = struct {
     }
 
     /// Checks if this option has a long name equal to `name`.
-    inline fn isLong(self: Option, name: []const u8) bool {
+    fn isLong(self: Option, name: []const u8) bool {
         if (self.long) |opt_long| {
             return std.mem.startsWith(u8, name, opt_long);
         }
@@ -168,13 +174,13 @@ pub const Arguments = struct {
     }
 
     /// Parses command-line arguments according to command specification.
-    /// Writes messages to `out`.
+    /// Writes error messages to `stderr`.
     pub fn parse(
         self: *Arguments,
         allocator: Allocator,
+        stderr: *std.Io.Writer,
         command: Command,
         args: []const []const u8,
-        out: *std.Io.Writer,
     ) !void {
         if (command.parameters) |_| {
             var i: usize = 0;
@@ -183,14 +189,14 @@ pub const Arguments = struct {
 
                 // Check for long options
                 if (std.mem.startsWith(u8, arg, "--")) {
-                    const skip_next = try self.parseLongArg(allocator, command, args, i, out);
+                    const skip_next = try self.parseLongArg(allocator, stderr, command, args, i);
                     if (skip_next) {
                         i += 1;
                     }
                 }
                 // Check for short options
                 else if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
-                    const skip_next = try self.parseShortArgs(allocator, command, args, i, out);
+                    const skip_next = try self.parseShortArgs(allocator, stderr, command, args, i);
                     if (skip_next) {
                         i += 1;
                     }
@@ -208,10 +214,10 @@ pub const Arguments = struct {
     fn parseLongArg(
         self: *Arguments,
         allocator: Allocator,
+        stderr: *std.Io.Writer,
         command: Command,
         args: []const []const u8,
         i: usize,
-        out: *std.Io.Writer,
     ) !bool {
         const arg = args[i];
         std.log.debug("Parsing long argument '{s}'", .{arg});
@@ -230,7 +236,7 @@ pub const Arguments = struct {
                 // --option format (value should be next arg)
 
                 if ((i + 1) >= args.len) {
-                    try out.print("Error: '--{s}' requires a value.\n", .{opt_long});
+                    try stderr.print("'--{s}' requires a value.\n", .{opt_long});
                     return error.MissingOptionValue;
                 }
 
@@ -248,7 +254,7 @@ pub const Arguments = struct {
             }
         }
 
-        try out.print("Error: Unknown option '{s}' for '{s}' command.\n", .{ arg, command.name });
+        try stderr.print("Unknown option '{s}' for '{s}' command.\n", .{ arg, command.name });
         return error.UnknownOption;
     }
 
@@ -257,10 +263,10 @@ pub const Arguments = struct {
     fn parseShortArgs(
         self: *Arguments,
         allocator: Allocator,
+        stderr: *std.Io.Writer,
         command: Command,
         args: []const []const u8,
         i: usize,
-        out: *std.Io.Writer,
     ) !bool {
         const arg = args[i];
         std.log.debug("Parsing short argument(s) '{s}'", .{arg});
@@ -276,15 +282,15 @@ pub const Arguments = struct {
                 if (option.require_value) {
                     if (char_idx != 1 or arg.len > 2) {
                         // Option is combined with other flags, which is not allowed
-                        try out.print(
-                            "Error: option '-{c}' requires a value and cannot be combined with other flags.\n",
+                        try stderr.print(
+                            "'-{c}' requires a value and cannot be combined with other flags.\n",
                             .{flag_char},
                         );
                         return error.OptionCannotBeCombined;
                     }
 
                     if ((i + 1) >= args.len) {
-                        try out.print("Error: '-{c}' requires a value.\n", .{flag_char});
+                        try stderr.print("'-{c}' requires a value.\n", .{flag_char});
                         return error.MissingOptionValue;
                     }
 
@@ -298,7 +304,7 @@ pub const Arguments = struct {
                 }
             }
 
-            try out.print("Error: Unknown flag '-{c}' for '{s}' command.\n", .{ flag_char, command.name });
+            try stderr.print("Unknown flag '-{c}' for '{s}' command.\n", .{ flag_char, command.name });
             return error.UnknownFlag;
         }
 

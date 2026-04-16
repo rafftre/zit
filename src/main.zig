@@ -25,26 +25,33 @@ pub fn main() !void {
         _ = debug_allocator.deinit();
     };
 
-    const stdout_file: std.fs.File = .stdout();
-    defer stdout_file.close();
-
     var out_buf: [1024]u8 = undefined;
-    var stdout_w = stdout_file.writer(&out_buf);
+    const stdout_file: std.fs.File = .stdout();
+    var stdout_w = stdout_file.writerStreaming(&out_buf);
     const stdout = &stdout_w.interface;
+
+    var err_buf: [1024]u8 = undefined;
+    const stderr_file: std.fs.File = .stderr();
+    var stderr_w = stderr_file.writerStreaming(&err_buf);
+    const stderr = &stderr_w.interface;
 
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
     if (args.len < 2) {
-        try cli.printUsage(stdout);
-        try stdout.flush();
+        try cli.printGlobalUsage(stderr);
+        try stderr.flush();
         return;
     }
 
     const command_name = args[1];
     const command_args = args[2..];
 
-    try cli.runCommand(gpa, stdout, command_name, command_args);
+    cli.dispatchCommand(gpa, stdout, stderr, command_name, command_args) catch |err| {
+        std.log.debug("Failed to run command: {s}", .{@errorName(err)});
+        cli.fail(stdout, stderr);
+    };
 
     try stdout.flush();
+    try stderr.flush();
 }

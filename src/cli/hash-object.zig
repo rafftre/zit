@@ -10,7 +10,7 @@ const Sha1 = zit.hash.Sha1;
 
 /// The hash-object command.
 pub const command = Command{
-    .run = run,
+    .run = handler,
     .name = "hash-object",
     .brief = "Compute object ID and optionally writes to the database",
     .description =
@@ -54,7 +54,7 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
     const type_str = args.parsed.get("t");
     const use_stdin = args.parsed.get("stdin") != null;
     const literally = args.parsed.get("literally") != null;
@@ -63,8 +63,8 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
     if (args.parsed.get("w") != null) { // persist
         repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
             error.GitDirNotFound => {
-                try out.print(
-                    "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                try stderr.print(
+                    "Repository not found (cannot find .git in current directory or any of the parents).\n",
                     .{},
                 );
                 return;
@@ -82,7 +82,6 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
 
     if (use_stdin) {
         const stdin_file: std.fs.File = .stdin();
-        defer stdin_file.close();
 
         var in_buf: [1024]u8 = undefined;
         var stdin_r = stdin_file.readerStreaming(&in_buf);
@@ -91,22 +90,12 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         var obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, literally);
         defer obj_id.deinit(allocator);
 
-        try out.print("{f}\n", .{obj_id});
+        try stdout.print("{f}\n", .{obj_id});
     }
 
     for (args.positional.items) |path| {
         const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-            // TODO: move stderr to main?
-            const stderr_file: std.fs.File = .stderr();
-            defer stderr_file.close();
-
-            var err_buf: [1024]u8 = undefined;
-            var stderr_w = stderr_file.writer(&err_buf);
-            const stderr = &stderr_w.interface;
-
             try stderr.print("Failed to open file: {s}\n", .{@errorName(err)});
-            try stderr.flush();
-
             continue;
         };
         defer file.close();
@@ -118,6 +107,6 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
         var obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, literally);
         defer obj_id.deinit(allocator);
 
-        try out.print("{f}\n", .{obj_id});
+        try stdout.print("{f}\n", .{obj_id});
     }
 }

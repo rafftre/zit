@@ -10,12 +10,12 @@ const Allocator = std.mem.Allocator;
 
 /// The version command.
 pub const command = Command{
-    .run = run,
+    .run = handler,
     .name = "version",
     .brief = "Show version information",
     .description = "Show the version of the application.",
 };
 
-fn run(_: Allocator, out: *std.Io.Writer, _: Command.Arguments) !void {
-    try out.print("{s} version {s}\n", .{ build_options.app_name, build_options.app_version });
+fn handler(_: Allocator, stdout: *std.Io.Writer, _: *std.Io.Writer, _: Command.Arguments) !void {
+    try stdout.print("{s} version {s}\n", .{ build_options.app_name, build_options.app_version });
 }

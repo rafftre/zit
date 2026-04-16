@@ -10,7 +10,7 @@ const Sha1 = zit.hash.Sha1;
 
 /// The ls-files command.
 pub const command = Command{
-    .run = run,
+    .run = handler,
     .name = "ls-files",
     .brief = "Show information about files in the index and the working tree",
     .description =
@@ -89,7 +89,7 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
     var opts: zit.file.ListOptions = .{
         .cached = args.parsed.get("cached") != null,
         .others = args.parsed.get("others") != null,
@@ -103,8 +103,8 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
 
     var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
         error.GitDirNotFound => {
-            try out.print(
-                "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+            try stderr.print(
+                "Repository not found (cannot find .git in current directory or any of the parents).\n",
                 .{},
             );
             return;
@@ -123,16 +123,16 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
 
     for (files.items) |file| {
         if (opts.stage_info and file.merge_stage != null) {
-            try out.print("{f} {f} {d}\t{s}", .{
+            try stdout.print("{f} {f} {d}\t{s}", .{
                 file.mode.?,
                 file.object_id.?,
                 @intFromEnum(file.merge_stage.?),
                 file.path,
             });
         } else {
-            try out.print("{s}", .{file.path});
+            try stdout.print("{s}", .{file.path});
         }
 
-        try if (zero_terminated) out.print("\x00", .{}) else out.print("\n", .{});
+        try if (zero_terminated) stdout.print("\x00", .{}) else stdout.print("\n", .{});
     }
 }

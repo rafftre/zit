@@ -10,7 +10,7 @@ const Sha1 = zit.hash.Sha1;
 
 /// The init command.
 pub const command = Command{
-    .run = run,
+    .run = handler,
     .name = "init",
     .brief = "Create an empty repository or reinitialize an existing one",
     .description =
@@ -58,7 +58,7 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(allocator: Allocator, stdout: *std.Io.Writer, _: *std.Io.Writer, args: Command.Arguments) !void {
     const name = if (args.positional.items.len > 0) args.positional.items[0] else null;
 
     var options: zit.SetupOptions = .{
@@ -73,5 +73,5 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
     var repo = try zit.Repository(Sha1).setup(allocator, .git, name, options);
     defer repo.deinit(allocator);
 
-    try out.print("Initialized empty Git repository in {s}\n", .{repo.name() orelse "unknown"});
+    try stdout.print("Initialized empty Git repository in {s}\n", .{repo.name() orelse "unknown"});
 }

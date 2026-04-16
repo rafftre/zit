@@ -10,7 +10,7 @@ const Sha1 = zit.hash.Sha1;
 
 /// The inflate command.
 pub const command = Command{
-    .run = run,
+    .run = handler,
     .name = "inflate",
     .brief = "Decompresses an object in the repository",
     .description =
@@ -30,14 +30,14 @@ pub const command = Command{
     },
 };
 
-fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
     if (args.positional.items.len > 0) {
         const obj_name = args.positional.items[0];
 
         var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
             error.GitDirNotFound => {
-                try out.print(
-                    "Error: Repository not found (cannot find .git in current directory or any of the parents).\n",
+                try stderr.print(
+                    "Repository not found (cannot find .git in current directory or any of the parents).\n",
                     .{},
                 );
                 return;
@@ -54,8 +54,8 @@ fn run(allocator: Allocator, out: *std.Io.Writer, args: Command.Arguments) !void
 
         try repo.readObject(allocator, &bytes.writer, obj_id);
 
-        try out.print("{s}", .{bytes.written()});
+        try stdout.print("{s}", .{bytes.written()});
     } else {
-        try out.print("Error: <object> is required.\n", .{});
+        try stderr.print("<object> is required.\n", .{});
     }
 }
