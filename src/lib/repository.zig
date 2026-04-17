@@ -69,6 +69,14 @@ pub fn Repository(comptime Hasher: type) type {
             }
         }
 
+        /// Returns `true` if `relative_path` (relative to the worktree root) is
+        /// inside the repository's internal directory (e.g. `.git/`).
+        pub fn isInternalPath(self: *const Self, relative_path: []const u8) bool {
+            switch (self.*) {
+                inline else => |*s| return s.*.isInternalPath(relative_path),
+            }
+        }
+
         /// Loads in memory and returns the index.
         /// Caller owns the returned memory.
         pub fn loadIndex(self: *const Self, allocator: Allocator) !Index {

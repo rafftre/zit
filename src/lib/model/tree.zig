@@ -343,7 +343,7 @@ pub fn Tree(comptime Hasher: type) type {
             while (offset < data.len) {
                 const space_pos = std.mem.indexOf(u8, data[offset..], " ") orelse break;
                 const null_pos = std.mem.indexOf(u8, data[(offset + space_pos + 1)..], "\x00") orelse break;
-                const entry_end = offset + space_pos + 1 + null_pos + 1 + 20;
+                const entry_end = offset + space_pos + 1 + null_pos + 1 + Hasher.hash_size;
 
                 if (entry_end > data.len) break;
 

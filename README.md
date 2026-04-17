@@ -61,7 +61,7 @@ zit cat-file -p 4b4f223d5c2b7c88abd487b3eaf5de2000755cc3
   ```
 - `hash-object` - Compute object ID and optionally writes to the database. Usage:
   ```
-  zit hash-object [-t <type>] [-w] [--stdin] <file>...
+  zit hash-object [-t <type>] [-w] [--stdin [--literally]] <file>...
   ```
 - `cat-file` - Provide contents or type and size information for objects. Usage:
   ```
@@ -78,6 +78,14 @@ zit cat-file -p 4b4f223d5c2b7c88abd487b3eaf5de2000755cc3
   ```
   zit inflate <object>
   ```
+- `help` - Show usage information. Without argument: show global help. Usage:
+  ```
+  zit help [<command>]
+  ```
+- `version` - Print the application version. Usage:
+  ```
+  zit version
+  ```
 
 
 ## Library Usage
@@ -90,7 +98,7 @@ The entry point is [lib.zig](./src/lib.zig).
 - Repository operations (`zit.Repository`): Opening an existing repository; Setting up a new repository; loading the index; reading and writing objects from and to the storage.
 - Plumbing commands:
   - object access and manipulation (`zit.object`) - creating and reading objects.
-  - index operations (`zit.file`) - list files in the index and in the worktree.
+  - file listing (`zit.file`) - list tracked, untracked, deleted, and modified files.
 
 
 ## Development

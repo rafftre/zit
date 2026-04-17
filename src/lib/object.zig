@@ -84,6 +84,7 @@ pub fn read(
 
     return .decode(allocator, bytes.written(), .{
         .expected_type = expected_type,
+        .expected_hash = object_id.bytes,
     });
 }
 

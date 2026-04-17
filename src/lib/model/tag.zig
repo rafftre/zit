@@ -60,7 +60,7 @@ pub fn Tag(comptime Hasher: type) type {
                 if (name) |*n| {
                     errdefer allocator.free(n);
                 }
-                errdefer msgbuf.deinit(allocator);
+                msgbuf.deinit(allocator);
             }
 
             var in_message = false;

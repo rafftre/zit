@@ -67,21 +67,20 @@ pub fn Commit(comptime Hasher: type) type {
                 if (committer) |*c| {
                     Signature.deinit(@constCast(c), allocator);
                 }
-                errdefer parents.deinit(allocator);
-                errdefer msgbuf.deinit(allocator);
+                parents.deinit(allocator);
+                msgbuf.deinit(allocator);
             }
 
             var in_message = false;
-            var in_pgpsign = false;
+            var skipping_header = false;
 
             var it = std.mem.splitScalar(u8, obj.content, '\n');
             while (it.next()) |line| {
-                if (in_pgpsign) {
+                if (skipping_header) {
                     if (line.len > 0 and line[0] == ' ') {
-                        _ = std.mem.trimLeft(u8, line, " ");
                         continue;
                     } else {
-                        in_pgpsign = false;
+                        skipping_header = false;
                     }
                 }
 
@@ -111,8 +110,8 @@ pub fn Commit(comptime Hasher: type) type {
                             author = try .deserialize(allocator, value);
                         } else if (std.mem.eql(u8, header, "committer") == true) {
                             committer = try .deserialize(allocator, value);
-                        } else if (std.mem.eql(u8, header, "gpgsig") == true) {
-                            in_pgpsign = true;
+                        } else {
+                            skipping_header = true;
                         }
                     }
                 }

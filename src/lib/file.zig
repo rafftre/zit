@@ -103,22 +103,23 @@ pub fn list(
         var dir = try std.fs.cwd().openDir(worktree.?, .{ .iterate = true });
         defer dir.close();
 
-        var walker = try dir.walk(allocator);
-        defer walker.deinit();
-
         if (opts.others) {
+            var walker = try dir.walk(allocator);
+            defer walker.deinit();
+
             while (try walker.next()) |entry| {
-                // FIXME: remove use of ".git" path (move to repository?)
-                if (entry.kind == .file and !std.mem.startsWith(u8, entry.path, ".git") and !index.contains(entry.path)) {
+                if (entry.kind == .file and !repository.isInternalPath(entry.path) and !index.contains(entry.path)) {
                     try appendUntrackedFile(allocator, Hasher, &res, entry.path);
                 }
             }
         }
 
         if (opts.killed) {
+            var walker = try dir.walk(allocator);
+            defer walker.deinit();
+
             while (try walker.next()) |entry| {
-                // FIXME: remove use of ".git" path (move to repository?)
-                if (!std.mem.startsWith(u8, entry.path, ".git") and index.containsPrefix(entry.path, true)) {
+                if (!repository.isInternalPath(entry.path) and index.containsPrefix(entry.path, true)) {
                     try appendUntrackedFile(allocator, Hasher, &res, entry.path);
                 }
             }

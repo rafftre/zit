@@ -136,6 +136,21 @@ pub fn GitRepository(comptime Hasher: type) type {
             return self.work_dir_path;
         }
 
+        /// Returns `true` if `relative_path` (relative to the worktree root) is
+        /// inside the repository's internal directory (e.g. `.git/`).
+        /// Always returns `false` when the git dir is outside the worktree.
+        pub fn isInternalPath(self: *const Self, relative_path: []const u8) bool {
+            const wt = self.work_dir_path orelse return false;
+            if (self.git_dir_path.len > wt.len + 1 and
+                std.mem.startsWith(u8, self.git_dir_path, wt) and
+                self.git_dir_path[wt.len] == std.fs.path.sep)
+            {
+                const rel = self.git_dir_path[(wt.len + 1)..];
+                return std.mem.startsWith(u8, relative_path, rel);
+            }
+            return false;
+        }
+
         /// Loads in memory and returns the index.
         /// Caller owns the returned memory.
         pub fn loadIndex(self: *const Self, allocator: Allocator) !Index {
@@ -186,10 +201,12 @@ pub fn GitRepository(comptime Hasher: type) type {
             var dest_dir = try cwd().makeOpenPath(dir_path, .{});
             defer dest_dir.close();
 
-            dest_dir.access(obj_name[2..], .{ .mode = .read_write }) catch |err| switch (err) {
-                error.FileNotFound => {},
+            if (dest_dir.access(obj_name[2..], .{})) {
+                return; // object already exists, skip
+            } else |err| switch (err) {
+                error.FileNotFound => {}, // proceed to write
                 else => return err,
-            };
+            }
 
             const temp_file_name = try generatePrefixedString(allocator, "tmp_obj_", 6);
             defer allocator.free(temp_file_name);
