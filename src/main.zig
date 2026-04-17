@@ -35,19 +35,18 @@ pub fn main() !void {
     var stderr_w = stderr_file.writerStreaming(&err_buf);
     const stderr = &stderr_w.interface;
 
-    const args = try std.process.argsAlloc(gpa);
-    defer std.process.argsFree(gpa, args);
+    var arg_iter = try std.process.argsWithAllocator(gpa);
+    defer arg_iter.deinit();
 
-    if (args.len < 2) {
+    _ = arg_iter.next(); // skip program name
+
+    const command_name = arg_iter.next() orelse {
         try cli.printGlobalUsage(stderr);
         try stderr.flush();
         return;
-    }
+    };
 
-    const command_name = args[1];
-    const command_args = args[2..];
-
-    cli.dispatchCommand(gpa, stdout, stderr, command_name, command_args) catch |err| {
+    cli.dispatchCommand(gpa, stdout, stderr, command_name, &arg_iter) catch |err| {
         std.log.debug("Failed to run command: {s}", .{@errorName(err)});
         cli.fail(stdout, stderr);
     };

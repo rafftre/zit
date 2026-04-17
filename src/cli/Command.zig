@@ -180,26 +180,17 @@ pub const Arguments = struct {
         allocator: Allocator,
         stderr: *std.Io.Writer,
         command: Command,
-        args: []const []const u8,
+        iter: *std.process.ArgIterator,
     ) !void {
         if (command.parameters) |_| {
-            var i: usize = 0;
-            while (i < args.len) : (i += 1) {
-                const arg = args[i];
-
+            while (iter.next()) |arg| {
                 // Check for long options
                 if (std.mem.startsWith(u8, arg, "--")) {
-                    const skip_next = try self.parseLongArg(allocator, stderr, command, args, i);
-                    if (skip_next) {
-                        i += 1;
-                    }
+                    try self.parseLongArg(allocator, stderr, command, arg, iter);
                 }
                 // Check for short options
                 else if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
-                    const skip_next = try self.parseShortArgs(allocator, stderr, command, args, i);
-                    if (skip_next) {
-                        i += 1;
-                    }
+                    try self.parseShortArgs(allocator, stderr, command, arg, iter);
                 }
                 // Positional argument
                 else {
@@ -209,17 +200,15 @@ pub const Arguments = struct {
         }
     }
 
-    // Parses a single long argument (--option, --option=value, or --option="spaced value")
-    // Returns `true` if args contains an isolated value that need to be skipped to continue parsing.
+    // Parses a single long argument (--option, --option=value, or --option="spaced value").
     fn parseLongArg(
         self: *Arguments,
         allocator: Allocator,
         stderr: *std.Io.Writer,
         command: Command,
-        args: []const []const u8,
-        i: usize,
-    ) !bool {
-        const arg = args[i];
+        arg: []const u8,
+        iter: *std.process.ArgIterator,
+    ) !void {
         std.log.debug("Parsing long argument '{s}'", .{arg});
 
         const long_name = arg[2..];
@@ -229,28 +218,28 @@ pub const Arguments = struct {
 
             if (!option.require_value) {
                 try self.parsed.put(try allocator.dupe(u8, opt_long), "true");
-                return false;
+                return;
             }
 
             if (long_name.len == opt_long.len) {
                 // --option format (value should be next arg)
 
-                if ((i + 1) >= args.len) {
+                const next = iter.next() orelse {
                     try stderr.print("'--{s}' requires a value.\n", .{opt_long});
                     return error.MissingOptionValue;
-                }
+                };
 
-                const value = try stripQuotes(args[i + 1]);
+                const value = try stripQuotes(next);
                 try self.parsed.put(try allocator.dupe(u8, opt_long), value);
 
-                return true;
+                return;
             } else if (long_name.len > opt_long.len and long_name[opt_long.len] == '=') {
                 // --option=value format
 
                 const value = try stripQuotes(long_name[(opt_long.len + 1)..]);
                 try self.parsed.put(try allocator.dupe(u8, opt_long), value);
 
-                return false;
+                return;
             }
         }
 
@@ -258,17 +247,15 @@ pub const Arguments = struct {
         return error.UnknownOption;
     }
 
-    // Parses a list of short arguments (-x or -xyz)
-    // Returns `true` if args contains an isolated value that need to be skipped to continue parsing.
+    // Parses a list of short arguments (-x or -xyz).
     fn parseShortArgs(
         self: *Arguments,
         allocator: Allocator,
         stderr: *std.Io.Writer,
         command: Command,
-        args: []const []const u8,
-        i: usize,
-    ) !bool {
-        const arg = args[i];
+        arg: []const u8,
+        iter: *std.process.ArgIterator,
+    ) !void {
         std.log.debug("Parsing short argument(s) '{s}'", .{arg});
 
         var char_idx: usize = 1;
@@ -289,15 +276,15 @@ pub const Arguments = struct {
                         return error.OptionCannotBeCombined;
                     }
 
-                    if ((i + 1) >= args.len) {
+                    const next = iter.next() orelse {
                         try stderr.print("'-{c}' requires a value.\n", .{flag_char});
                         return error.MissingOptionValue;
-                    }
+                    };
 
-                    const value = try stripQuotes(args[i + 1]);
+                    const value = try stripQuotes(next);
                     try self.parsed.put(try allocator.dupe(u8, key), value);
 
-                    return true;
+                    return;
                 } else {
                     try self.parsed.put(try allocator.dupe(u8, key), "true");
                     continue;
@@ -307,8 +294,6 @@ pub const Arguments = struct {
             try stderr.print("Unknown flag '-{c}' for '{s}' command.\n", .{ flag_char, command.name });
             return error.UnknownFlag;
         }
-
-        return false;
     }
 };
 

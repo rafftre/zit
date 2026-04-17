@@ -55,15 +55,15 @@ pub fn dispatchCommand(
     allocator: Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
-    name: [:0]u8,
-    args: [][:0]u8,
+    name: [:0]const u8,
+    iter: *std.process.ArgIterator,
 ) !void {
     for (command_list) |cmd| {
         if (std.mem.eql(u8, cmd.name, name)) {
             var cmd_args = Command.Arguments.init(allocator);
             defer cmd_args.deinit(allocator);
 
-            try cmd_args.parse(allocator, stderr, cmd, args);
+            try cmd_args.parse(allocator, stderr, cmd, iter);
             try cmd.run(allocator, stdout, stderr, cmd_args);
             return;
         }
