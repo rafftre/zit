@@ -26,7 +26,7 @@ pub fn create(
     obj_type: Type,
     /// `true` means the object must pass standard object parsing otherwise an error is returned.
     check_format: bool,
-) !*Repository(Hasher).Object.Id {
+) !Repository(Hasher).Object.Id {
     var bytes: std.Io.Writer.Allocating = .init(allocator);
     defer bytes.deinit();
 
@@ -50,14 +50,12 @@ pub fn create(
         defer decoded.deinit(allocator);
     }
 
-    var object_id = try allocator.create(Repository(Hasher).Object.Id);
-    errdefer object_id.deinit(allocator);
-
+    var object_id: Repository(Hasher).Object.Id = .{};
     Hasher.hashData(encoded_obj, &object_id.bytes);
 
     if (repository) |r| {
         var obj_r: std.Io.Reader = .fixed(encoded_obj);
-        try r.writeObject(allocator, &obj_r, object_id);
+        try r.writeObject(allocator, &obj_r, &object_id);
     }
 
     return object_id;
@@ -73,7 +71,7 @@ pub fn read(
     /// The repository to use for reading the object.
     repository: Repository(Hasher),
     /// The object's identifier.
-    object_id: *Repository(Hasher).Object.Id,
+    object_id: *const Repository(Hasher).Object.Id,
     /// The expected type of the object, returns an error if it doesn't match.
     expected_type: ?Type,
 ) !Repository(Hasher).LooseObject {
@@ -98,10 +96,9 @@ test "create and read object" {
     var repo = try tmpRepository(allocator, test_hasher);
     defer repo.deinit(allocator);
 
-    var obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
-    defer obj_id.deinit(allocator);
+    const obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
 
-    var read_obj = try read(allocator, test_hasher, repo, obj_id, .blob);
+    var read_obj = try read(allocator, test_hasher, repo, &obj_id, .blob);
     defer read_obj.deinit(allocator);
 
     try std.testing.expectEqual(.blob, read_obj.object_type);
@@ -118,7 +115,7 @@ pub fn getType(
     /// The repository to use for reading the object.
     repository: Repository(Hasher),
     /// The object's identifier.
-    object_id: *Repository(Hasher).Object.Id,
+    object_id: *const Repository(Hasher).Object.Id,
     /// If `true` no error will be raised for an unknown type.
     allow_unknown_type: bool,
 ) !Type {
@@ -145,10 +142,9 @@ test "get object type" {
     var repo = try tmpRepository(allocator, test_hasher);
     defer repo.deinit(allocator);
 
-    var obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
-    defer obj_id.deinit(allocator);
+    const obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
 
-    const read_typ = try getType(allocator, test_hasher, repo, obj_id, true);
+    const read_typ = try getType(allocator, test_hasher, repo, &obj_id, true);
     try std.testing.expectEqualStrings("blob", read_typ.toString().?);
 }
 
@@ -190,9 +186,8 @@ test "get object size" {
     defer repo.deinit(allocator);
 
     var obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
-    defer obj_id.deinit(allocator);
 
-    const obj_size = try getSize(allocator, test_hasher, repo, obj_id, true);
+    const obj_size = try getSize(allocator, test_hasher, repo, &obj_id, true);
     try std.testing.expect(test_content.len == obj_size);
 }
 
@@ -202,11 +197,10 @@ fn createTestObject(
     repository: Repository(Hasher),
     object_name: []const u8,
     content: []u8,
-) !*Repository(Hasher).Object.Id {
+) !Repository(Hasher).Object.Id {
     var reader: std.Io.Reader = .fixed(content);
 
-    var object_id = try create(allocator, &reader, Hasher, repository, .blob, true);
-    errdefer object_id.deinit(allocator);
+    const object_id = try create(allocator, &reader, Hasher, repository, .blob, true);
 
     const hex = try object_id.toHex(allocator);
     defer allocator.free(hex);

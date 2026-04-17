@@ -18,10 +18,9 @@ const Signature = @import("signature.zig").Signature;
 /// - a name,
 /// - a text message.
 /// Conforms to the object interface.
-/// An annotated tag object takes ownership of the referenced `object_id`.
 pub fn Tag(comptime Hasher: type) type {
     return struct {
-        object_id: *ObjectId,
+        object_id: ObjectId,
         object_type: ObjectType,
         tagger: Signature,
         name: []const u8,
@@ -36,9 +35,7 @@ pub fn Tag(comptime Hasher: type) type {
         }
 
         /// Implements the method with the same name in the object interface.
-        /// Note: this also frees the referenced `object_id`.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.object_id.deinit(allocator);
             self.tagger.deinit(allocator);
             allocator.free(self.name);
             allocator.free(self.message);
@@ -48,7 +45,7 @@ pub fn Tag(comptime Hasher: type) type {
         /// Deinitialize with `deinit`.
         /// Implements the method with the same name in the object interface.
         pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
-            var object_id: ?*ObjectId = null;
+            var object_id: ?ObjectId = null;
             var object_type: ?ObjectType = null;
             var tagger: ?Signature = null;
             var name: ?[]u8 = null;
@@ -85,7 +82,7 @@ pub fn Tag(comptime Hasher: type) type {
                         const value = line[(i + 1)..];
 
                         if (std.mem.eql(u8, header, "object") == true) {
-                            object_id = try .fromHex(allocator, value);
+                            object_id = try .fromHex(value);
                         } else if (std.mem.eql(u8, header, "type") == true) {
                             object_type = .parse(value);
                         } else if (std.mem.eql(u8, header, "tag") == true) {
@@ -135,7 +132,7 @@ pub fn Tag(comptime Hasher: type) type {
                 \\
                 \\{s}
             , .{
-                self.object_id,
+                &self.object_id,
                 @tagName(self.object_type),
                 self.name,
                 self.tagger,
@@ -150,7 +147,7 @@ test "tag serialization" {
     const TestTag = Tag(hash.Sha1);
 
     var tag: TestTag = .{
-        .object_id = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
+        .object_id = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
             .identity = .{
@@ -170,7 +167,7 @@ test "tag serialization" {
     var deserialized: TestTag = try .deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(tag.object_id.eql(deserialized.object_id));
+    try std.testing.expect(tag.object_id.eql(&deserialized.object_id));
     try std.testing.expectEqual(tag.object_type, deserialized.object_type);
     try std.testing.expect(tag.tagger.eql(&deserialized.tagger));
     try std.testing.expectEqualStrings(tag.name, deserialized.name);
@@ -191,7 +188,7 @@ test "format tag" {
     ;
 
     var tag: TestTag = .{
-        .object_id = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
+        .object_id = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
             .identity = .{

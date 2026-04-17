@@ -88,18 +88,16 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
 
         const obj_type = zit.object.Type.parse(expected_type);
 
-        var obj_id = try zit.Repository(Sha1).Object.Id.fromHex(allocator, obj_name);
-        defer obj_id.deinit(allocator);
+        const obj_id = try zit.Repository(Sha1).Object.Id.fromHex(obj_name);
 
-        var loose_obj = try zit.object.read(allocator, Sha1, repo, obj_id, obj_type);
+        var loose_obj = try zit.object.read(allocator, Sha1, repo, &obj_id, obj_type);
         defer loose_obj.deinit(allocator);
 
         try stdout.print("{s}", .{loose_obj.content});
     } else if (args.positional.items.len > 0) {
         const obj_name = args.positional.items[0];
 
-        var obj_id = try zit.Repository(Sha1).Object.Id.fromHex(allocator, obj_name);
-        defer obj_id.deinit(allocator);
+        var obj_id = try zit.Repository(Sha1).Object.Id.fromHex(obj_name);
 
         if (eptsCount(check_exists, pretty_print, get_size, get_type) > 1) {
             try stderr.print("Selected flags are incompatible.\n", .{});
@@ -112,7 +110,7 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
                 return;
             }
 
-            var loose_obj = zit.object.read(allocator, Sha1, repo, obj_id, null) catch |err| switch (err) {
+            var loose_obj = zit.object.read(allocator, Sha1, repo, &obj_id, null) catch |err| switch (err) {
                 error.FileNotFound => cli.fail(stdout, stderr),
                 else => return err,
             };
@@ -123,7 +121,7 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
                 return;
             }
 
-            var loose_obj = try zit.object.read(allocator, Sha1, repo, obj_id, null);
+            var loose_obj = try zit.object.read(allocator, Sha1, repo, &obj_id, null);
             defer loose_obj.deinit(allocator);
 
             var obj: zit.Repository(Sha1).Object = try .deserialize(allocator, &loose_obj);
@@ -131,10 +129,10 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
 
             try stdout.print("{f}", .{obj});
         } else if (get_size) {
-            const obj_size = try zit.object.getSize(allocator, Sha1, repo, obj_id, allow_unknown_type);
+            const obj_size = try zit.object.getSize(allocator, Sha1, repo, &obj_id, allow_unknown_type);
             try stdout.print("{d}\n", .{obj_size});
         } else if (get_type) {
-            const obj_type = try zit.object.getType(allocator, Sha1, repo, obj_id, allow_unknown_type);
+            const obj_type = try zit.object.getType(allocator, Sha1, repo, &obj_id, allow_unknown_type);
             try stdout.print("{s}\n", .{obj_type.toString() orelse "unknown"});
         }
     } else {

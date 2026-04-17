@@ -60,19 +60,16 @@ const TreeEntryType = enum {
 
 /// A tree entry.
 /// It's composed by a file mode, a name, and an object ID.
-/// It takes ownership of the referenced `object_id`.
 pub fn TreeEntry(comptime Hasher: type) type {
     return struct {
         entry_type: TreeEntryType = .blob,
-        object_id: *ObjectId,
+        object_id: ObjectId,
         name: []const u8,
 
         const Self = @This();
         const ObjectId = Object(Hasher).Id;
 
-        /// Note: this also frees the referenced `object_id`.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.object_id.deinit(allocator);
             allocator.free(self.name);
         }
 
@@ -90,13 +87,10 @@ pub fn TreeEntry(comptime Hasher: type) type {
             errdefer allocator.free(name);
             offset += name_end + 1;
 
-            var object_id = try allocator.create(ObjectId);
-            errdefer allocator.destroy(object_id);
+            if (data.len < offset + Hasher.hash_size) return error.InvalidFormat;
 
-            const hash_size = object_id.bytes.len;
-
-            if (data.len < offset + hash_size) return error.InvalidFormat;
-            @memcpy(object_id.bytes[0..hash_size], data[offset..(offset + hash_size)]);
+            var object_id: ObjectId = .{};
+            @memcpy(object_id.bytes[0..Hasher.hash_size], data[offset..(offset + Hasher.hash_size)]);
 
             return .{
                 .entry_type = .of(parsed_mode),
@@ -108,7 +102,7 @@ pub fn TreeEntry(comptime Hasher: type) type {
         /// Serializes the entry content.
         /// Caller owns the returned memory.
         pub fn serialize(self: *const Self, allocator: Allocator) ![]u8 {
-            const hash_size = self.object_id.bytes.len;
+            const hash_size = Hasher.hash_size;
             const total_len = mode_len + 1 + self.name.len + 1 + hash_size;
 
             const result = try allocator.alloc(u8, total_len);
@@ -169,7 +163,7 @@ pub fn TreeEntry(comptime Hasher: type) type {
             try writer.print("{f} {s} {f} {s}", .{
                 self.entry_type.mode(),
                 mode_label,
-                self.object_id,
+                &self.object_id,
                 self.name,
             });
         }
@@ -182,7 +176,7 @@ test "tree entry serialization" {
 
     var entry: TestEntry = .{
         .entry_type = .executable,
-        .object_id = try .fromHex(allocator, "fedcba0987654321fedcba0987654321fedcba09"),
+        .object_id = try .fromHex("fedcba0987654321fedcba0987654321fedcba09"),
         .name = try allocator.dupe(u8, "script.sh"),
     };
     defer entry.deinit(allocator);
@@ -195,7 +189,7 @@ test "tree entry serialization" {
 
     try std.testing.expect(entry.entry_type == deserialized.entry_type);
     try std.testing.expectEqualSlices(u8, entry.name, deserialized.name);
-    try std.testing.expect(entry.object_id.eql(deserialized.object_id));
+    try std.testing.expect(entry.object_id.eql(&deserialized.object_id));
 }
 
 test "sort tree entry" {
@@ -206,39 +200,39 @@ test "sort tree entry" {
 
     var readme: TestEntry =
         .{
-            .object_id = try .fromHex(allocator, empty_file_hash),
+            .object_id = try .fromHex(empty_file_hash),
             .name = try allocator.dupe(u8, "README"),
         };
     defer readme.deinit(allocator);
 
     var aout_exe: TestEntry = .{
         .entry_type = .executable,
-        .object_id = try .fromHex(allocator, empty_file_hash),
+        .object_id = try .fromHex(empty_file_hash),
         .name = try allocator.dupe(u8, "a.out"),
     };
     defer aout_exe.deinit(allocator);
 
     var aout: TestEntry = .{
-        .object_id = try .fromHex(allocator, empty_file_hash),
+        .object_id = try .fromHex(empty_file_hash),
         .name = try allocator.dupe(u8, "a.out"),
     };
     defer aout.deinit(allocator);
 
     var lib: TestEntry = .{
-        .object_id = try .fromHex(allocator, empty_file_hash),
+        .object_id = try .fromHex(empty_file_hash),
         .name = try allocator.dupe(u8, "lib"),
     };
     defer lib.deinit(allocator);
 
     var lib_dir: TestEntry = .{
         .entry_type = .tree,
-        .object_id = try .fromHex(allocator, empty_file_hash),
+        .object_id = try .fromHex(empty_file_hash),
         .name = try allocator.dupe(u8, "lib"),
     };
     defer lib_dir.deinit(allocator);
 
     var liba: TestEntry = .{
-        .object_id = try .fromHex(allocator, empty_file_hash),
+        .object_id = try .fromHex(empty_file_hash),
         .name = try allocator.dupe(u8, "lib-a"),
     };
     defer liba.deinit(allocator);
@@ -270,7 +264,7 @@ test "format tree entry" {
 
     var entry: TreeEntry(hash.Sha1) = .{
         .entry_type = .executable,
-        .object_id = try Object(hash.Sha1).Id.fromHex(allocator, test_hex),
+        .object_id = try Object(hash.Sha1).Id.fromHex(test_hex),
         .name = try allocator.dupe(u8, test_name),
     };
     defer entry.deinit(allocator);
@@ -315,7 +309,7 @@ pub fn Tree(comptime Hasher: type) type {
             self: *Self,
             allocator: Allocator,
             entry_type: EntryType,
-            object_id: *ObjectId,
+            object_id: ObjectId,
             name: []const u8,
         ) !Entry {
             const entry: Entry = .{
@@ -413,14 +407,14 @@ test "tree serialization" {
     const file_entry = try tree.addEntry(
         allocator,
         .blob,
-        try .fromHex(allocator, "1234567890123456789012345678901234567890"),
+        try .fromHex("1234567890123456789012345678901234567890"),
         "file1.txt",
     );
 
     const dir_entry = try tree.addEntry(
         allocator,
         .tree,
-        try .fromHex(allocator, "abcdefabcdefabcdefabcdefabcdefabcdefabcd"),
+        try .fromHex("abcdefabcdefabcdefabcdefabcdefabcdefabcd"),
         "subdir",
     );
 
@@ -435,12 +429,12 @@ test "tree serialization" {
     const first_entry = deserialized.entries.items[0];
     try std.testing.expect(file_entry.entry_type == first_entry.entry_type);
     try std.testing.expectEqualSlices(u8, file_entry.name, first_entry.name);
-    try std.testing.expect(file_entry.object_id.eql(first_entry.object_id));
+    try std.testing.expect(file_entry.object_id.eql(&first_entry.object_id));
 
     const second_entry = deserialized.entries.items[1];
     try std.testing.expect(dir_entry.entry_type == second_entry.entry_type);
     try std.testing.expectEqualSlices(u8, dir_entry.name, second_entry.name);
-    try std.testing.expect(dir_entry.object_id.eql(second_entry.object_id));
+    try std.testing.expect(dir_entry.object_id.eql(&second_entry.object_id));
 }
 
 test "format tree" {
@@ -461,12 +455,12 @@ test "format tree" {
     var tree: TestTree = .{};
     defer tree.deinit(allocator);
 
-    _ = try tree.addEntry(allocator, .blob, try .fromHex(allocator, empty_file_hash), "foo.bar.baz");
-    _ = try tree.addEntry(allocator, .blob, try .fromHex(allocator, empty_file_hash), "foo.bar");
-    _ = try tree.addEntry(allocator, .executable, try .fromHex(allocator, empty_file_hash), "foo");
-    _ = try tree.addEntry(allocator, .tree, try .fromHex(allocator, empty_file_hash), "lib");
-    _ = try tree.addEntry(allocator, .blob, try .fromHex(allocator, empty_file_hash), "lib-a");
-    _ = try tree.addEntry(allocator, .blob, try .fromHex(allocator, empty_file_hash), "README");
+    _ = try tree.addEntry(allocator, .blob, try .fromHex(empty_file_hash), "foo.bar.baz");
+    _ = try tree.addEntry(allocator, .blob, try .fromHex(empty_file_hash), "foo.bar");
+    _ = try tree.addEntry(allocator, .executable, try .fromHex(empty_file_hash), "foo");
+    _ = try tree.addEntry(allocator, .tree, try .fromHex(empty_file_hash), "lib");
+    _ = try tree.addEntry(allocator, .blob, try .fromHex(empty_file_hash), "lib-a");
+    _ = try tree.addEntry(allocator, .blob, try .fromHex(empty_file_hash), "README");
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);

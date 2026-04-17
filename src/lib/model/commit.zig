@@ -19,8 +19,8 @@ const Signature = @import("signature.zig").Signature;
 /// A commit object takes ownership of all the referenced `tree` and `parents`.
 pub fn Commit(comptime Hasher: type) type {
     return struct {
-        tree: *ObjectId,
-        parents: std.ArrayList(*ObjectId) = .empty,
+        tree: ObjectId,
+        parents: std.ArrayList(ObjectId) = .empty,
         author: Signature,
         committer: Signature,
         message: []const u8,
@@ -34,12 +34,7 @@ pub fn Commit(comptime Hasher: type) type {
         }
 
         /// Implements the method with the same name in the object interface.
-        /// Note: this also frees the referenced `tree` and all `parents`.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.tree.deinit(allocator);
-            for (self.parents.items) |p| {
-                p.deinit(allocator);
-            }
             self.parents.deinit(allocator);
             self.author.deinit(allocator);
             self.committer.deinit(allocator);
@@ -47,7 +42,7 @@ pub fn Commit(comptime Hasher: type) type {
         }
 
         /// Adds a new commit as parent.
-        pub fn addParent(self: *Self, allocator: Allocator, object_id: *ObjectId) !void {
+        pub fn addParent(self: *Self, allocator: Allocator, object_id: ObjectId) !void {
             try self.parents.append(allocator, object_id);
         }
 
@@ -55,8 +50,8 @@ pub fn Commit(comptime Hasher: type) type {
         /// Deinitialize with `deinit`.
         /// Implements the method with the same name in the object interface.
         pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
-            var tree: ?*ObjectId = null;
-            var parents: std.ArrayList(*ObjectId) = .empty;
+            var tree: ?ObjectId = null;
+            var parents: std.ArrayList(ObjectId) = .empty;
             var author: ?Signature = null;
             var committer: ?Signature = null;
             var msgbuf: std.ArrayList(u8) = .empty;
@@ -102,9 +97,9 @@ pub fn Commit(comptime Hasher: type) type {
                         const value = line[(i + 1)..];
 
                         if (std.mem.eql(u8, header, "tree") == true) {
-                            tree = try .fromHex(allocator, value);
+                            tree = try .fromHex(value);
                         } else if (std.mem.eql(u8, header, "parent") == true) {
-                            const object_id: *ObjectId = try .fromHex(allocator, value);
+                            const object_id: ObjectId = try .fromHex(value);
                             try parents.append(allocator, object_id);
                         } else if (std.mem.eql(u8, header, "author") == true) {
                             author = try .deserialize(allocator, value);
@@ -147,9 +142,9 @@ pub fn Commit(comptime Hasher: type) type {
 
         /// Formatting method for use with `std.io.Writer.print`.
         pub fn format(self: *const Self, writer: *std.io.Writer) !void {
-            try writer.print("tree {f}\n", .{self.tree});
+            try writer.print("tree {f}\n", .{&self.tree});
 
-            for (self.parents.items) |parent| {
+            for (self.parents.items) |*parent| {
                 try writer.print("parent {f}\n", .{parent});
             }
 
@@ -168,7 +163,7 @@ test "commit serialization" {
     const TestCommit = Commit(hash.Sha1);
 
     var commit: TestCommit = .{
-        .tree = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
+        .tree = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .author = .{
             .identity = .{
                 .name = try allocator.dupe(u8, "Test Author"),
@@ -187,8 +182,8 @@ test "commit serialization" {
     };
     defer commit.deinit(allocator);
 
-    try commit.addParent(allocator, try .fromHex(allocator, "fedcba0987654321fedcba0987654321fedcba09"));
-    try commit.addParent(allocator, try .fromHex(allocator, "ba0987654321fedcba0987654321fedcba09fedc"));
+    try commit.addParent(allocator, try .fromHex("fedcba0987654321fedcba0987654321fedcba09"));
+    try commit.addParent(allocator, try .fromHex("ba0987654321fedcba0987654321fedcba09fedc"));
 
     var serialized = try commit.serialize(allocator);
     defer serialized.deinit(allocator);
@@ -196,7 +191,7 @@ test "commit serialization" {
     var deserialized: TestCommit = try .deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(commit.tree.eql(deserialized.tree));
+    try std.testing.expect(commit.tree.eql(&deserialized.tree));
     try std.testing.expectEqual(2, deserialized.parents.items.len);
     try std.testing.expect(commit.author.eql(&deserialized.author));
     try std.testing.expect(commit.committer.eql(&deserialized.committer));
@@ -218,7 +213,7 @@ test "format commit" {
     ;
 
     var commit: TestCommit = .{
-        .tree = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
+        .tree = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .author = .{
             .identity = .{
                 .name = try allocator.dupe(u8, "Test Author"),
@@ -237,8 +232,8 @@ test "format commit" {
     };
     defer commit.deinit(allocator);
 
-    try commit.addParent(allocator, try .fromHex(allocator, "fedcba0987654321fedcba0987654321fedcba09"));
-    try commit.addParent(allocator, try .fromHex(allocator, "ba0987654321fedcba0987654321fedcba09fedc"));
+    try commit.addParent(allocator, try .fromHex("fedcba0987654321fedcba0987654321fedcba09"));
+    try commit.addParent(allocator, try .fromHex("ba0987654321fedcba0987654321fedcba09fedc"));
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);

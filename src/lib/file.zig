@@ -16,7 +16,7 @@ pub fn File(comptime Hasher: type) type {
         /// Path in the filesystem.
         path: []const u8,
         /// Object ID (only included for tracked files)
-        object_id: ?*Repository(Hasher).Object.Id = null,
+        object_id: ?Repository(Hasher).Object.Id = null,
         /// File mode (only included for tracked files)
         mode: ?fs.FileMode = null,
         /// Stage info (only included for tracked files)
@@ -25,9 +25,6 @@ pub fn File(comptime Hasher: type) type {
         const Self = @This();
 
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            if (self.object_id) |oid| {
-                oid.deinit(allocator);
-            }
             allocator.free(self.path);
         }
 
@@ -170,7 +167,7 @@ fn appendTrackedFile(
     };
 
     if (stage_info) {
-        var oid = try allocator.create(Repository(Hasher).Object.Id);
+        var oid: Repository(Hasher).Object.Id = .{};
         @memcpy(&oid.bytes, &entry.hash);
 
         file.object_id = oid;

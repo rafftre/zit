@@ -326,28 +326,20 @@ pub fn Object(comptime Hasher: type) type {
         pub const Id = struct {
             bytes: [Hasher.hash_size]u8 = [_]u8{0} ** Hasher.hash_size,
 
-            pub fn deinit(id: *Id, allocator: Allocator) void {
-                allocator.destroy(id);
-            }
-
             /// Parses an object ID from an hexadecimal string.
-            /// Deinitialize with `deinit`.
-            pub fn fromHex(allocator: Allocator, hex: []const u8) !*Id {
-                var id = try allocator.create(Id);
-                errdefer allocator.destroy(id);
-
+            pub fn fromHex(hex: []const u8) !Id {
+                var id: Id = .{};
                 try hash.parseHex(hex, &id.bytes);
-
                 return id;
             }
 
             /// Formats this object ID as an hexadecimal string.
             /// Caller owns the returned memory.
-            pub fn toHex(id: *Id, allocator: Allocator) ![]u8 {
+            pub fn toHex(id: *const Id, allocator: Allocator) ![]u8 {
                 const res = try allocator.alloc(u8, Hasher.hash_size * 2);
                 errdefer allocator.free(res);
 
-                try hash.toHex(&id.bytes, res);
+                try hash.toHex(@constCast(&id.bytes), res);
 
                 return res;
             }
@@ -404,21 +396,22 @@ test "object id" {
 
     const Oid = Object(hash.Sha1).Id;
 
-    var empty_oid: Oid = undefined;
+    const empty_oid: Oid = .{};
 
     const test_chars = "0123456789abcdeffedcba98765432100f1e2d3c";
-    var test_oid: Oid = .{ .bytes = [_]u8{
+    const test_oid: Oid = .{ .bytes = [_]u8{
         0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc,
         0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0x0f, 0x1e, 0x2d, 0x3c,
     } };
 
-    const copy_oid = try allocator.dupe(u8, &test_oid.bytes);
-    defer allocator.free(copy_oid);
-
-    var test_copy_oid: Oid = .{ .bytes = copy_oid[0..hash.Sha1.hash_size].* };
+    const test_copy_oid = try Oid.fromHex(test_chars);
 
     try std.testing.expect(!empty_oid.eql(&test_oid));
     try std.testing.expect(test_oid.eql(&test_copy_oid));
+
+    const hex = try test_oid.toHex(allocator);
+    defer allocator.free(hex);
+    try std.testing.expectEqualStrings(test_chars, hex);
 
     var buf: [hash.Sha1.hash_size * 2]u8 = undefined;
     var w: std.io.Writer = .fixed(&buf);
@@ -468,7 +461,7 @@ test "tree via object interface" {
     _ = try tree_obj.addEntry(
         allocator,
         .blob,
-        try .fromHex(allocator, "0123456789abcdef0123456789abcdef01234567"),
+        try .fromHex("0123456789abcdef0123456789abcdef01234567"),
         "README.md",
     );
 
@@ -510,7 +503,7 @@ test "commit via object interface" {
     ;
 
     var commit_obj: Commit(hash.Sha1) = .{
-        .tree = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
+        .tree = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .author = .{
             .identity = .{
                 .name = try allocator.dupe(u8, "Test Author"),
@@ -527,8 +520,8 @@ test "commit via object interface" {
         },
         .message = try allocator.dupe(u8, "Test commit message"),
     };
-    try commit_obj.addParent(allocator, try .fromHex(allocator, "fedcba0987654321fedcba0987654321fedcba09"));
-    try commit_obj.addParent(allocator, try .fromHex(allocator, "ba0987654321fedcba0987654321fedcba09fedc"));
+    try commit_obj.addParent(allocator, try .fromHex("fedcba0987654321fedcba0987654321fedcba09"));
+    try commit_obj.addParent(allocator, try .fromHex("ba0987654321fedcba0987654321fedcba09fedc"));
 
     var obj = commit_obj.interface();
     defer obj.deinit(allocator);
@@ -543,7 +536,7 @@ test "commit via object interface" {
     var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(commit_obj.tree.eql(deserialized.commit.tree));
+    try std.testing.expect(commit_obj.tree.eql(&deserialized.commit.tree));
     try std.testing.expectEqual(commit_obj.parents.items.len, deserialized.commit.parents.items.len);
     try std.testing.expect(commit_obj.author.eql(&deserialized.commit.author));
     try std.testing.expect(commit_obj.committer.eql(&deserialized.commit.committer));
@@ -569,7 +562,7 @@ test "tag via object interface" {
     ;
 
     var tag_obj: Tag(hash.Sha1) = .{
-        .object_id = try .fromHex(allocator, "1234567890abcdef1234567890abcdef12345678"),
+        .object_id = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
             .identity = .{
@@ -595,7 +588,7 @@ test "tag via object interface" {
     var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
-    try std.testing.expect(tag_obj.object_id.eql(deserialized.tag.object_id));
+    try std.testing.expect(tag_obj.object_id.eql(&deserialized.tag.object_id));
     try std.testing.expectEqual(tag_obj.object_type, deserialized.tag.object_type);
     try std.testing.expect(tag_obj.tagger.eql(&deserialized.tag.tagger));
     try std.testing.expectEqualStrings(tag_obj.name, deserialized.tag.name);

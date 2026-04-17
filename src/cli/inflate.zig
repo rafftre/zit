@@ -46,13 +46,12 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
         };
         defer repo.deinit(allocator);
 
-        var obj_id = try zit.Repository(Sha1).Object.Id.fromHex(allocator, obj_name);
-        defer obj_id.deinit(allocator);
+        const obj_id = try zit.Repository(Sha1).Object.Id.fromHex(obj_name);
 
         var bytes: std.Io.Writer.Allocating = .init(allocator);
         defer bytes.deinit();
 
-        try repo.readObject(allocator, &bytes.writer, obj_id);
+        try repo.readObject(allocator, &bytes.writer, &obj_id);
 
         try stdout.print("{s}", .{bytes.written()});
     } else {

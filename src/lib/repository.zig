@@ -86,12 +86,11 @@ pub fn Repository(comptime Hasher: type) type {
         }
 
         /// Reads an object from the store.
-        /// Deinitialize with `deinit`.
         pub fn readObject(
             self: *const Self,
             allocator: Allocator,
             writer: *std.Io.Writer,
-            object_id: *Object.Id,
+            object_id: *const Object.Id,
         ) !void {
             switch (self.*) {
                 inline else => |*s| try s.*.readObject(allocator, writer, object_id),
@@ -104,7 +103,7 @@ pub fn Repository(comptime Hasher: type) type {
             self: *const Self,
             allocator: Allocator,
             reader: *std.Io.Reader,
-            object_id: *Object.Id,
+            object_id: *const Object.Id,
         ) !void {
             switch (self.*) {
                 inline else => |*s| try s.*.writeObject(allocator, reader, object_id),

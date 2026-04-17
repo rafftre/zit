@@ -170,10 +170,10 @@ pub fn GitRepository(comptime Hasher: type) type {
             self: *const Self,
             allocator: Allocator,
             writer: *std.Io.Writer,
-            object_id: *Object.Id,
+            object_id: *const Object.Id,
         ) !void {
             var obj_name: [Hasher.hash_size * 2]u8 = undefined;
-            try hash.toHex(&object_id.bytes, &obj_name);
+            try hash.toHex(@constCast(&object_id.bytes), &obj_name);
 
             const file_path = try path.join(allocator, &.{ self.objects_dir_path, obj_name[0..2], obj_name[2..] });
             defer allocator.free(file_path);
@@ -190,10 +190,10 @@ pub fn GitRepository(comptime Hasher: type) type {
             self: *const Self,
             allocator: Allocator,
             reader: *std.Io.Reader,
-            object_id: *Object.Id,
+            object_id: *const Object.Id,
         ) !void {
             var obj_name: [Hasher.hash_size * 2]u8 = undefined;
-            try hash.toHex(&object_id.bytes, &obj_name);
+            try hash.toHex(@constCast(&object_id.bytes), &obj_name);
 
             const dir_path = try path.join(allocator, &.{ self.objects_dir_path, obj_name[0..2] });
             defer allocator.free(dir_path);
@@ -427,15 +427,14 @@ test "write and read from a git repository" {
     const encoded_obj = "blob 14\x00sample content";
     const obj_name = "0d6f364b742a718be66b1b25e954015b6a98e310";
 
-    var object_id: *Sha1GitRepository.Object.Id = try .fromHex(allocator, obj_name);
-    defer object_id.deinit(allocator);
+    const object_id: Sha1GitRepository.Object.Id = try .fromHex(obj_name);
 
     var obj_r: std.Io.Reader = .fixed(encoded_obj);
-    try repo.writeObject(allocator, &obj_r, object_id);
+    try repo.writeObject(allocator, &obj_r, &object_id);
 
     var obj_bytes: std.Io.Writer.Allocating = .init(allocator);
     defer obj_bytes.deinit();
 
-    try repo.readObject(allocator, &obj_bytes.writer, object_id);
+    try repo.readObject(allocator, &obj_bytes.writer, &object_id);
     try std.testing.expectEqualSlices(u8, encoded_obj, obj_bytes.written());
 }

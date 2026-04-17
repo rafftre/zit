@@ -87,10 +87,8 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
         var stdin_r = stdin_file.readerStreaming(&in_buf);
         const stdin = &stdin_r.interface;
 
-        var obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, literally);
-        defer obj_id.deinit(allocator);
-
-        try stdout.print("{f}\n", .{obj_id});
+        const obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, literally);
+        try stdout.print("{f}\n", .{&obj_id});
     }
 
     for (args.positional.items) |path| {
@@ -104,9 +102,7 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
         var file_r = file.readerStreaming(&file_buf);
         const reader = &file_r.interface;
 
-        var obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, literally);
-        defer obj_id.deinit(allocator);
-
-        try stdout.print("{f}\n", .{obj_id});
+        const obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, literally);
+        try stdout.print("{f}\n", .{&obj_id});
     }
 }
