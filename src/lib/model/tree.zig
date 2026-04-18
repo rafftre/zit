@@ -327,7 +327,7 @@ pub fn Tree(comptime Hasher: type) type {
         /// Deserializes a tree.
         /// Deinitialize with `deinit`.
         /// Implements the method with the same name in the object interface.
-        pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
+        pub fn deserialize(allocator: Allocator, obj: *const LooseObject(Hasher)) !Self {
             var entries: std.ArrayList(Entry) = .empty;
             errdefer entries.deinit(allocator);
 

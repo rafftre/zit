@@ -134,6 +134,18 @@ Each level corresponds to a Zig package with the following structure (from highe
 - `cli.zig` — CLI entry-point.
 - `lib.zig` — library access interface.
 
+### Memory Model for Objects
+When deserializing objects (`Blob`, `Commit`, `Tag`, `Signature`, `Identity`),
+their string fields are slices directly into the source `LooseObject`'s content buffer
+(no copies are made) to minimise heap allocations.
+This means that a deserialized object must not outlive the `LooseObject` it was read from.
+
+Only `Commit.parents` and `Tree.entries` are heap-allocated and freed by `deinit`.
+All other `deinit` calls are no-ops.
+
+When constructing objects programmatically (not from deserialization),
+the caller is responsible for the lifetime of any strings stored in the object's fields.
+
 ### Limitations
 - Object names must be used in full length, i.e. 40 characters hash are needed to identify objects.
 - The commit object does not handle message encoding and extra headers (such as mergetag).

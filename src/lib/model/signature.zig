@@ -9,26 +9,15 @@ pub const Identity = struct {
     name: []const u8,
     email: []const u8,
 
-    pub fn deinit(self: *Identity, allocator: Allocator) void {
-        allocator.free(self.name);
-        allocator.free(self.email);
-    }
-
     /// Deserializes an identity.
-    /// Deinitialize with `deinit`.
-    pub fn deserialize(allocator: Allocator, data: []const u8) !Identity {
+    /// The returned slices borrow from `data`, for this reason `data` must outlive the identity.
+    pub fn deserialize(data: []const u8) !Identity {
         const email_start = std.mem.indexOf(u8, data, "<") orelse return error.InvalidFormat;
         const email_end = std.mem.indexOf(u8, data, ">") orelse return error.InvalidFormat;
 
-        const name = try allocator.dupe(u8, std.mem.trim(u8, data[0..email_start], " "));
-        errdefer allocator.free(name);
-
-        const email = try allocator.dupe(u8, data[(email_start + 1)..email_end]);
-        errdefer allocator.free(email);
-
         return .{
-            .name = name,
-            .email = email,
+            .name = std.mem.trim(u8, data[0..email_start], " "),
+            .email = data[(email_start + 1)..email_end],
         };
     }
 
@@ -60,8 +49,7 @@ test "identity serialization" {
     const serialized = try ident.serialize(allocator);
     defer allocator.free(serialized);
 
-    var deserialized = try Identity.deserialize(allocator, serialized);
-    defer deserialized.deinit(allocator);
+    const deserialized: Identity = try .deserialize(serialized);
 
     try std.testing.expectEqualStrings(ident.name, deserialized.name);
     try std.testing.expectEqualStrings(ident.email, deserialized.email);
@@ -104,7 +92,7 @@ pub const Time = struct {
     tz_offset_minutes: i16,
 
     /// Deserializes a time.
-    pub fn deserialize(_: Allocator, data: []const u8) !Time {
+    pub fn deserialize(data: []const u8) !Time {
         const seconds_from_epoch_end = std.mem.indexOf(u8, data, " ") orelse return error.InvalidFormat;
         const seconds_from_epoch = data[0..seconds_from_epoch_end];
         const tz_offset_minutes = data[(seconds_from_epoch_end + 1)..];
@@ -177,7 +165,7 @@ test "time serialization" {
     const serialized = try time.serialize(allocator);
     defer allocator.free(serialized);
 
-    const deserialized = try Time.deserialize(allocator, serialized);
+    const deserialized: Time = try .deserialize(serialized);
 
     try std.testing.expectEqual(time.seconds_from_epoch, deserialized.seconds_from_epoch);
     try std.testing.expectEqual(time.tz_offset_minutes, deserialized.tz_offset_minutes);
@@ -220,21 +208,15 @@ pub const Signature = struct {
     identity: Identity,
     time: Time,
 
-    pub fn deinit(self: *Signature, allocator: Allocator) void {
-        self.identity.deinit(allocator);
-    }
-
     /// Deserializes a signature.
-    /// Deinitialize with `deinit`.
-    pub fn deserialize(allocator: Allocator, data: []const u8) !Signature {
+    /// The string fields in the returned signature borrow from `data`,
+    /// for this reason `data` must outlive the signature.
+    pub fn deserialize(data: []const u8) !Signature {
         const email_end = std.mem.indexOf(u8, data, ">") orelse return error.InvalidFormat;
 
-        const ident = try Identity.deserialize(allocator, data[0..(email_end + 1)]);
-        const time = try Time.deserialize(allocator, data[(email_end + 2)..]);
-
         return .{
-            .identity = ident,
-            .time = time,
+            .identity = try .deserialize(data[0..(email_end + 1)]),
+            .time = try .deserialize(data[(email_end + 2)..]),
         };
     }
 
@@ -271,8 +253,7 @@ test "signature serialization" {
     const serialized = try sign.serialize(allocator);
     defer allocator.free(serialized);
 
-    var deserialized = try Signature.deserialize(allocator, serialized);
-    defer deserialized.deinit(allocator);
+    const deserialized: Signature = try .deserialize(serialized);
 
     try std.testing.expectEqualStrings(sign.identity.name, deserialized.identity.name);
     try std.testing.expectEqualStrings(sign.identity.email, deserialized.identity.email);

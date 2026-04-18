@@ -16,7 +16,8 @@ const Signature = @import("signature.zig").Signature;
 /// - the author and committer signatures,
 /// - a text message.
 /// Conforms to the object interface.
-/// A commit object takes ownership of all the referenced `tree` and `parents`.
+/// String fields (author, committer, message) borrow from the LooseObject used during deserialization.
+/// The `parents` ArrayList is owned and freed by `deinit`.
 pub fn Commit(comptime Hasher: type) type {
     return struct {
         tree: ObjectId,
@@ -33,12 +34,10 @@ pub fn Commit(comptime Hasher: type) type {
             return .{ .commit = self };
         }
 
-        /// Implements the method with the same name in the object interface.
+        /// Frees the `parents` list.
+        /// String fields are not owned and must not be freed here.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.parents.deinit(allocator);
-            self.author.deinit(allocator);
-            self.committer.deinit(allocator);
-            allocator.free(self.message);
         }
 
         /// Adds a new commit as parent.
@@ -47,29 +46,24 @@ pub fn Commit(comptime Hasher: type) type {
         }
 
         /// Deserializes a commit.
-        /// Deinitialize with `deinit`.
+        /// String fields in the returned commit borrow from `obj.content`,
+        /// for this reason `obj` must outlive the Commit.
+        /// Deinitializes with `deinit` to free the `parents` list.
         /// Implements the method with the same name in the object interface.
-        pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
+        pub fn deserialize(allocator: Allocator, obj: *const LooseObject(Hasher)) !Self {
+            const body_sep = std.mem.indexOf(u8, obj.content, "\n\n") orelse return error.InvalidCommitFormat;
+            const headers_part = obj.content[0..body_sep];
+            const message: []const u8 = obj.content[(body_sep + 2)..];
+
             var tree: ?ObjectId = null;
-            var parents: std.ArrayList(ObjectId) = .empty;
             var author: ?Signature = null;
             var committer: ?Signature = null;
-            var msgbuf: std.ArrayList(u8) = .empty;
-            errdefer {
-                if (author) |*a| {
-                    Signature.deinit(@constCast(a), allocator);
-                }
-                if (committer) |*c| {
-                    Signature.deinit(@constCast(c), allocator);
-                }
-                parents.deinit(allocator);
-                msgbuf.deinit(allocator);
-            }
+            var parents: std.ArrayList(ObjectId) = .empty;
+            errdefer parents.deinit(allocator);
 
-            var in_message = false;
             var skipping_header = false;
 
-            var it = std.mem.splitScalar(u8, obj.content, '\n');
+            var it = std.mem.splitScalar(u8, headers_part, '\n');
             while (it.next()) |line| {
                 if (skipping_header) {
                     if (line.len > 0 and line[0] == ' ') {
@@ -79,35 +73,25 @@ pub fn Commit(comptime Hasher: type) type {
                     }
                 }
 
-                if (in_message) {
-                    if (msgbuf.items.len > 0) {
-                        try msgbuf.append(allocator, '\n');
-                    }
-                    try msgbuf.appendSlice(allocator, line);
-                } else {
-                    const trimmed = std.mem.trim(u8, line, " \t\r\n");
-                    if (trimmed.len == 0) {
-                        in_message = true;
-                        continue;
-                    }
+                const trimmed = std.mem.trim(u8, line, " \t\r\n");
+                if (trimmed.len == 0) continue;
 
-                    const space_idx = std.mem.indexOf(u8, trimmed, " ");
-                    if (space_idx) |i| {
-                        const header = line[0..i];
-                        const value = line[(i + 1)..];
+                const space_idx = std.mem.indexOf(u8, trimmed, " ");
+                if (space_idx) |i| {
+                    const header = trimmed[0..i];
+                    const value = trimmed[(i + 1)..];
 
-                        if (std.mem.eql(u8, header, "tree") == true) {
-                            tree = try .fromHex(value);
-                        } else if (std.mem.eql(u8, header, "parent") == true) {
-                            const object_id: ObjectId = try .fromHex(value);
-                            try parents.append(allocator, object_id);
-                        } else if (std.mem.eql(u8, header, "author") == true) {
-                            author = try .deserialize(allocator, value);
-                        } else if (std.mem.eql(u8, header, "committer") == true) {
-                            committer = try .deserialize(allocator, value);
-                        } else {
-                            skipping_header = true;
-                        }
+                    if (std.mem.eql(u8, header, "tree")) {
+                        tree = try .fromHex(value);
+                    } else if (std.mem.eql(u8, header, "parent")) {
+                        const object_id: ObjectId = try .fromHex(value);
+                        try parents.append(allocator, object_id);
+                    } else if (std.mem.eql(u8, header, "author")) {
+                        author = try Signature.deserialize(value);
+                    } else if (std.mem.eql(u8, header, "committer")) {
+                        committer = try Signature.deserialize(value);
+                    } else {
+                        skipping_header = true;
                     }
                 }
             }
@@ -121,7 +105,7 @@ pub fn Commit(comptime Hasher: type) type {
                 .parents = parents,
                 .author = author.?,
                 .committer = committer.?,
-                .message = try msgbuf.toOwnedSlice(allocator),
+                .message = message,
             };
         }
 
@@ -166,19 +150,19 @@ test "commit serialization" {
         .tree = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .author = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Author"),
-                .email = try allocator.dupe(u8, "author@example.com"),
+                .name = "Test Author",
+                .email = "author@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
         .committer = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Committer"),
-                .email = try allocator.dupe(u8, "committer@example.com"),
+                .name = "Test Committer",
+                .email = "committer@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995300, .tz_offset_minutes = 120 },
         },
-        .message = try allocator.dupe(u8, "Test commit message"),
+        .message = "Test commit message",
     };
     defer commit.deinit(allocator);
 
@@ -216,19 +200,19 @@ test "format commit" {
         .tree = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .author = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Author"),
-                .email = try allocator.dupe(u8, "author@example.com"),
+                .name = "Test Author",
+                .email = "author@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
         .committer = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Committer"),
-                .email = try allocator.dupe(u8, "committer@example.com"),
+                .name = "Test Committer",
+                .email = "committer@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995300, .tz_offset_minutes = 120 },
         },
-        .message = try allocator.dupe(u8, "Test commit message"),
+        .message = "Test commit message",
     };
     defer commit.deinit(allocator);
 

@@ -363,14 +363,17 @@ pub fn Object(comptime Hasher: type) type {
             }
         }
 
-        /// Deserializes an object.
+        /// Deserializes an object from a LooseObject.
+        /// String fields in returned object borrow from `obj.content`,
+        /// for this reason `obj` must outlive the returned one.
+        /// Only Commit.parents and Tree.entries are heap-allocated.
         /// Deinitialize with `deinit`.
-        pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
+        pub fn deserialize(allocator: Allocator, obj: *const LooseObject(Hasher)) !Self {
             return switch (obj.object_type) {
-                .commit => .{ .commit = try .deserialize(allocator, obj) },
-                .tag => .{ .tag = try .deserialize(allocator, obj) },
-                .tree => .{ .tree = try .deserialize(allocator, obj) },
-                else => .{ .blob = try Blob(Hasher).deserialize(allocator, obj) },
+                .commit => .{ .commit = try Commit(Hasher).deserialize(allocator, obj) },
+                .tag => .{ .tag = try Tag(Hasher).deserialize(obj) },
+                .tree => .{ .tree = try Tree(Hasher).deserialize(allocator, obj) },
+                else => .{ .blob = Blob(Hasher).deserialize(obj) },
             };
         }
 
@@ -425,8 +428,7 @@ test "blob via object interface" {
 
     const test_data = "Hello, Git blob!";
 
-    var blob_obj: Blob(hash.Sha1) = .{ .content = try allocator.dupe(u8, test_data) };
-
+    const blob_obj: Blob(hash.Sha1) = .{ .content = test_data };
     var obj = blob_obj.interface();
     defer obj.deinit(allocator);
 
@@ -437,7 +439,7 @@ test "blob via object interface" {
 
     try std.testing.expect(serialized.object_type == .blob);
 
-    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
+    var deserialized: Object(hash.Sha1) = try .deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, blob_obj.content, deserialized.blob.content);
@@ -475,7 +477,7 @@ test "tree via object interface" {
 
     try std.testing.expect(serialized.object_type == .tree);
 
-    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
+    var deserialized: Object(hash.Sha1) = try .deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
     try std.testing.expectEqual(1, deserialized.tree.entries.items.len);
@@ -506,19 +508,19 @@ test "commit via object interface" {
         .tree = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .author = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Author"),
-                .email = try allocator.dupe(u8, "author@example.com"),
+                .name = "Test Author",
+                .email = "author@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
         .committer = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Committer"),
-                .email = try allocator.dupe(u8, "committer@example.com"),
+                .name = "Test Committer",
+                .email = "committer@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995300, .tz_offset_minutes = 120 },
         },
-        .message = try allocator.dupe(u8, "Test commit message"),
+        .message = "Test commit message",
     };
     try commit_obj.addParent(allocator, try .fromHex("fedcba0987654321fedcba0987654321fedcba09"));
     try commit_obj.addParent(allocator, try .fromHex("ba0987654321fedcba0987654321fedcba09fedc"));
@@ -533,7 +535,7 @@ test "commit via object interface" {
 
     try std.testing.expect(serialized.object_type == .commit);
 
-    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
+    var deserialized: Object(hash.Sha1) = try .deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
     try std.testing.expect(commit_obj.tree.eql(&deserialized.commit.tree));
@@ -561,18 +563,18 @@ test "tag via object interface" {
         \\Test tag message
     ;
 
-    var tag_obj: Tag(hash.Sha1) = .{
+    const tag_obj: Tag(hash.Sha1) = .{
         .object_id = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Author"),
-                .email = try allocator.dupe(u8, "author@example.com"),
+                .name = "Test Author",
+                .email = "author@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
-        .name = try allocator.dupe(u8, "test-tag"),
-        .message = try allocator.dupe(u8, "Test tag message"),
+        .name = "test-tag",
+        .message = "Test tag message",
     };
 
     var obj = tag_obj.interface();
@@ -585,7 +587,7 @@ test "tag via object interface" {
 
     try std.testing.expect(serialized.object_type == .tag);
 
-    var deserialized = try Object(hash.Sha1).deserialize(allocator, &serialized);
+    var deserialized: Object(hash.Sha1) = try .deserialize(allocator, &serialized);
     defer deserialized.deinit(allocator);
 
     try std.testing.expect(tag_obj.object_id.eql(&deserialized.tag.object_id));

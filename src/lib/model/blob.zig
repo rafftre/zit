@@ -13,7 +13,7 @@ const LooseObject = @import("object.zig").LooseObject;
 /// Conforms to the object interface.
 pub fn Blob(comptime Hasher: type) type {
     return struct {
-        content: []u8,
+        content: []const u8,
 
         const Self = @This();
 
@@ -22,15 +22,14 @@ pub fn Blob(comptime Hasher: type) type {
             return .{ .blob = self };
         }
 
-        /// Implements the method with the same name in the object interface.
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            allocator.free(self.content);
-        }
+        /// No-op.
+        pub fn deinit(_: *Self, _: Allocator) void {}
 
         /// Deserializes a blob.
+        /// The returned content borrows from `obj`, for this reason `obj` must outlive the blob.
         /// Implements the method with the same name in the object interface.
-        pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
-            return .{ .content = try allocator.dupe(u8, obj.content) };
+        pub fn deserialize(obj: *const LooseObject(Hasher)) Self {
+            return .{ .content = obj.content };
         }
 
         /// Serializes the blob.
@@ -54,14 +53,12 @@ test "blob serialization" {
     const allocator = std.testing.allocator;
     const TestBlob = Blob(hash.Sha1);
 
-    var blob: TestBlob = .{ .content = try allocator.dupe(u8, "Hello, Git blob!") };
-    defer blob.deinit(allocator);
+    const blob: TestBlob = .{ .content = "Hello, Git blob!" };
 
     var serialized = try blob.serialize(allocator);
     defer serialized.deinit(allocator);
 
-    var deserialized = try TestBlob.deserialize(allocator, &serialized);
-    defer deserialized.deinit(allocator);
+    const deserialized: TestBlob = .deserialize(&serialized);
 
     try std.testing.expectEqualSlices(u8, blob.content, deserialized.content);
 }
@@ -71,8 +68,7 @@ test "format blob" {
 
     const test_data = "Hello, Git blob!";
 
-    var blob: Blob(hash.Sha1) = .{ .content = try allocator.dupe(u8, test_data) };
-    defer blob.deinit(allocator);
+    const blob: Blob(hash.Sha1) = .{ .content = test_data };
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);

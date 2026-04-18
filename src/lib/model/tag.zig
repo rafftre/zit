@@ -14,10 +14,11 @@ const Signature = @import("signature.zig").Signature;
 /// It contains
 /// - the object ID,
 /// - the object type name,
-/// - the tagger signature,
+/// - the tagger identity,
 /// - a name,
 /// - a text message.
 /// Conforms to the object interface.
+/// All string fields (tagger identity, name, message) borrow from the LooseObject used during deserialization.
 pub fn Tag(comptime Hasher: type) type {
     return struct {
         object_id: ObjectId,
@@ -34,62 +35,41 @@ pub fn Tag(comptime Hasher: type) type {
             return .{ .tag = self };
         }
 
-        /// Implements the method with the same name in the object interface.
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            self.tagger.deinit(allocator);
-            allocator.free(self.name);
-            allocator.free(self.message);
-        }
+        /// No-op.
+        pub fn deinit(_: *Self, _: Allocator) void {}
 
         /// Deserializes a tag.
-        /// Deinitialize with `deinit`.
+        /// All string fields in the returned tag borrow from `obj.content`,
+        /// for this reason `obj` must outlive the tag.
         /// Implements the method with the same name in the object interface.
-        pub fn deserialize(allocator: Allocator, obj: *LooseObject(Hasher)) !Self {
+        pub fn deserialize(obj: *const LooseObject(Hasher)) !Self {
+            const body_sep = std.mem.indexOf(u8, obj.content, "\n\n") orelse return error.InvalidTagFormat;
+            const headers_part = obj.content[0..body_sep];
+            const message: []const u8 = obj.content[(body_sep + 2)..];
+
             var object_id: ?ObjectId = null;
             var object_type: ?ObjectType = null;
             var tagger: ?Signature = null;
-            var name: ?[]u8 = null;
-            var msgbuf: std.ArrayList(u8) = .empty;
-            errdefer {
-                if (tagger) |*t| {
-                    Signature.deinit(@constCast(t), allocator);
-                }
-                if (name) |*n| {
-                    errdefer allocator.free(n);
-                }
-                msgbuf.deinit(allocator);
-            }
+            var name: ?[]const u8 = null;
 
-            var in_message = false;
-
-            var it = std.mem.splitScalar(u8, obj.content, '\n');
+            var it = std.mem.splitScalar(u8, headers_part, '\n');
             while (it.next()) |line| {
-                if (in_message) {
-                    if (msgbuf.items.len > 0) {
-                        try msgbuf.append(allocator, '\n');
-                    }
-                    try msgbuf.appendSlice(allocator, line);
-                } else {
-                    const trimmed = std.mem.trim(u8, line, " \t\r\n");
-                    if (trimmed.len == 0) {
-                        in_message = true;
-                        continue;
-                    }
+                const trimmed = std.mem.trim(u8, line, " \t\r\n");
+                if (trimmed.len == 0) continue;
 
-                    const space_idx = std.mem.indexOf(u8, trimmed, " ");
-                    if (space_idx) |i| {
-                        const header = line[0..i];
-                        const value = line[(i + 1)..];
+                const space_idx = std.mem.indexOf(u8, trimmed, " ");
+                if (space_idx) |i| {
+                    const header = trimmed[0..i];
+                    const value = trimmed[(i + 1)..];
 
-                        if (std.mem.eql(u8, header, "object") == true) {
-                            object_id = try .fromHex(value);
-                        } else if (std.mem.eql(u8, header, "type") == true) {
-                            object_type = .parse(value);
-                        } else if (std.mem.eql(u8, header, "tag") == true) {
-                            name = try allocator.dupe(u8, value);
-                        } else if (std.mem.eql(u8, header, "tagger") == true) {
-                            tagger = try .deserialize(allocator, value);
-                        }
+                    if (std.mem.eql(u8, header, "object")) {
+                        object_id = try .fromHex(value);
+                    } else if (std.mem.eql(u8, header, "type")) {
+                        object_type = .parse(value);
+                    } else if (std.mem.eql(u8, header, "tag")) {
+                        name = value;
+                    } else if (std.mem.eql(u8, header, "tagger")) {
+                        tagger = try Signature.deserialize(value);
                     }
                 }
             }
@@ -103,7 +83,7 @@ pub fn Tag(comptime Hasher: type) type {
                 .object_type = object_type.?,
                 .tagger = tagger.?,
                 .name = name.?,
-                .message = try msgbuf.toOwnedSlice(allocator),
+                .message = message,
             };
         }
 
@@ -146,26 +126,24 @@ test "tag serialization" {
     const allocator = std.testing.allocator;
     const TestTag = Tag(hash.Sha1);
 
-    var tag: TestTag = .{
+    const tag: TestTag = .{
         .object_id = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Author"),
-                .email = try allocator.dupe(u8, "author@example.com"),
+                .name = "Test Author",
+                .email = "author@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
-        .name = try allocator.dupe(u8, "test-tag"),
-        .message = try allocator.dupe(u8, "Test tag message"),
+        .name = "test-tag",
+        .message = "Test tag message",
     };
-    defer tag.deinit(allocator);
 
     var serialized = try tag.serialize(allocator);
     defer serialized.deinit(allocator);
 
-    var deserialized: TestTag = try .deserialize(allocator, &serialized);
-    defer deserialized.deinit(allocator);
+    const deserialized: TestTag = try .deserialize(&serialized);
 
     try std.testing.expect(tag.object_id.eql(&deserialized.object_id));
     try std.testing.expectEqual(tag.object_type, deserialized.object_type);
@@ -187,20 +165,19 @@ test "format tag" {
         \\Test tag message
     ;
 
-    var tag: TestTag = .{
+    const tag: TestTag = .{
         .object_id = try .fromHex("1234567890abcdef1234567890abcdef12345678"),
         .object_type = .commit,
         .tagger = .{
             .identity = .{
-                .name = try allocator.dupe(u8, "Test Author"),
-                .email = try allocator.dupe(u8, "author@example.com"),
+                .name = "Test Author",
+                .email = "author@example.com",
             },
             .time = .{ .seconds_from_epoch = 1640995200, .tz_offset_minutes = 120 },
         },
-        .name = try allocator.dupe(u8, "test-tag"),
-        .message = try allocator.dupe(u8, "Test tag message"),
+        .name = "test-tag",
+        .message = "Test tag message",
     };
-    defer tag.deinit(allocator);
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);
