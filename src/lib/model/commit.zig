@@ -35,7 +35,6 @@ pub fn Commit(comptime Hasher: type) type {
         }
 
         /// Frees the `parents` list.
-        /// String fields are not owned and must not be freed here.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             self.parents.deinit(allocator);
         }
@@ -47,8 +46,8 @@ pub fn Commit(comptime Hasher: type) type {
 
         /// Deserializes a commit.
         /// String fields in the returned commit borrow from `obj.content`,
-        /// for this reason `obj` must outlive the Commit.
-        /// Deinitializes with `deinit` to free the `parents` list.
+        /// for this reason `obj` must outlive the commit.
+        /// Deinitialize with `deinit` to free the `parents` list.
         /// Implements the method with the same name in the object interface.
         pub fn deserialize(allocator: Allocator, obj: *const LooseObject(Hasher)) !Self {
             const body_sep = std.mem.indexOf(u8, obj.content, "\n\n") orelse return error.InvalidCommitFormat;

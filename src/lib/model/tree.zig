@@ -60,6 +60,7 @@ const TreeEntryType = enum {
 
 /// A tree entry.
 /// It's composed by a file mode, a name, and an object ID.
+/// The name borrows from the LooseObject used during deserialization.
 pub fn TreeEntry(comptime Hasher: type) type {
     return struct {
         entry_type: TreeEntryType = .blob,
@@ -69,13 +70,9 @@ pub fn TreeEntry(comptime Hasher: type) type {
         const Self = @This();
         const ObjectId = Object(Hasher).Id;
 
-        pub fn deinit(self: *Self, allocator: Allocator) void {
-            allocator.free(self.name);
-        }
-
         /// Deserializes an entry.
-        /// Deinitialize with `deinit`.
-        pub fn deserialize(allocator: Allocator, data: []u8) !Self {
+        /// The name in the returned entry borrows from `data`, for this reason `data` must outlive the entry.
+        pub fn deserialize(data: []const u8) !Self {
             var offset: usize = 0;
 
             const mode_end = std.mem.indexOf(u8, data[offset..], " ") orelse return error.InvalidFormat;
@@ -83,8 +80,7 @@ pub fn TreeEntry(comptime Hasher: type) type {
             offset += mode_end + 1;
 
             const name_end = std.mem.indexOf(u8, data[offset..], "\x00") orelse return error.InvalidFormat;
-            const name = try allocator.dupe(u8, data[offset..(offset + name_end)]);
-            errdefer allocator.free(name);
+            const name = data[offset..(offset + name_end)];
             offset += name_end + 1;
 
             if (data.len < offset + Hasher.hash_size) return error.InvalidFormat;
@@ -174,18 +170,16 @@ test "tree entry serialization" {
     const allocator = std.testing.allocator;
     const TestEntry = TreeEntry(hash.Sha1);
 
-    var entry: TestEntry = .{
+    const entry: TestEntry = .{
         .entry_type = .executable,
         .object_id = try .fromHex("fedcba0987654321fedcba0987654321fedcba09"),
-        .name = try allocator.dupe(u8, "script.sh"),
+        .name = "script.sh",
     };
-    defer entry.deinit(allocator);
 
     const serialized = try entry.serialize(allocator);
     defer allocator.free(serialized);
 
-    var deserialized: TestEntry = try .deserialize(allocator, serialized);
-    defer deserialized.deinit(allocator);
+    const deserialized: TestEntry = try .deserialize(serialized);
 
     try std.testing.expect(entry.entry_type == deserialized.entry_type);
     try std.testing.expectEqualSlices(u8, entry.name, deserialized.name);
@@ -193,49 +187,36 @@ test "tree entry serialization" {
 }
 
 test "sort tree entry" {
-    const allocator = std.testing.allocator;
     const TestEntry = TreeEntry(hash.Sha1);
 
     const empty_file_hash = "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391";
 
-    var readme: TestEntry =
-        .{
-            .object_id = try .fromHex(empty_file_hash),
-            .name = try allocator.dupe(u8, "README"),
-        };
-    defer readme.deinit(allocator);
-
-    var aout_exe: TestEntry = .{
+    const readme: TestEntry = .{
+        .object_id = try .fromHex(empty_file_hash),
+        .name = "README",
+    };
+    const aout_exe: TestEntry = .{
         .entry_type = .executable,
         .object_id = try .fromHex(empty_file_hash),
-        .name = try allocator.dupe(u8, "a.out"),
+        .name = "a.out",
     };
-    defer aout_exe.deinit(allocator);
-
-    var aout: TestEntry = .{
+    const aout: TestEntry = .{
         .object_id = try .fromHex(empty_file_hash),
-        .name = try allocator.dupe(u8, "a.out"),
+        .name = "a.out",
     };
-    defer aout.deinit(allocator);
-
-    var lib: TestEntry = .{
+    const lib: TestEntry = .{
         .object_id = try .fromHex(empty_file_hash),
-        .name = try allocator.dupe(u8, "lib"),
+        .name = "lib",
     };
-    defer lib.deinit(allocator);
-
-    var lib_dir: TestEntry = .{
+    const lib_dir: TestEntry = .{
         .entry_type = .tree,
         .object_id = try .fromHex(empty_file_hash),
-        .name = try allocator.dupe(u8, "lib"),
+        .name = "lib",
     };
-    defer lib_dir.deinit(allocator);
-
-    var liba: TestEntry = .{
+    const liba: TestEntry = .{
         .object_id = try .fromHex(empty_file_hash),
-        .name = try allocator.dupe(u8, "lib-a"),
+        .name = "lib-a",
     };
-    defer liba.deinit(allocator);
 
     // lexicographic order
     try std.testing.expectEqual(true, TestEntry.lessThan({}, readme, aout_exe));
@@ -262,12 +243,11 @@ test "format tree entry" {
     const test_name = "script.sh";
     const test_data = "100755 blob " ++ test_hex ++ " " ++ test_name;
 
-    var entry: TreeEntry(hash.Sha1) = .{
+    const entry: TreeEntry(hash.Sha1) = .{
         .entry_type = .executable,
         .object_id = try Object(hash.Sha1).Id.fromHex(test_hex),
-        .name = try allocator.dupe(u8, test_name),
+        .name = test_name,
     };
-    defer entry.deinit(allocator);
 
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(allocator);
@@ -280,6 +260,7 @@ test "format tree entry" {
 /// It's a list of entries, sorted by name.
 /// Directory entries are ordered by adding a slash to the end.
 /// Conforms to the object interface.
+/// Entry names do not own their memory; see `addEntry` and `deserialize` functions.
 pub fn Tree(comptime Hasher: type) type {
     return struct {
         entries: std.ArrayList(Entry) = .empty,
@@ -295,16 +276,14 @@ pub fn Tree(comptime Hasher: type) type {
             return .{ .tree = self };
         }
 
-        /// Implements the method with the same name in the object interface.
+        /// Frees the `entries` list.
         pub fn deinit(self: *Self, allocator: Allocator) void {
-            for (self.entries.items) |*e| {
-                e.deinit(allocator);
-            }
             self.entries.deinit(allocator);
         }
 
         /// Adds a new entry to the tree.
-        /// Sort entries after addition.
+        /// The `name` slice is stored as-is, the caller must keep it alive for the lifetime of the tree.
+        /// Sorts entries after addition.
         pub fn addEntry(
             self: *Self,
             allocator: Allocator,
@@ -315,7 +294,7 @@ pub fn Tree(comptime Hasher: type) type {
             const entry: Entry = .{
                 .entry_type = entry_type,
                 .object_id = object_id,
-                .name = try allocator.dupe(u8, name),
+                .name = name,
             };
 
             try self.entries.append(allocator, entry);
@@ -325,13 +304,15 @@ pub fn Tree(comptime Hasher: type) type {
         }
 
         /// Deserializes a tree.
-        /// Deinitialize with `deinit`.
+        /// Entry names borrow from `obj.content`,
+        /// for this reason `obj` must outlive the tree.
+        /// Deinitialize with `deinit` to free the `entries` list.
         /// Implements the method with the same name in the object interface.
         pub fn deserialize(allocator: Allocator, obj: *const LooseObject(Hasher)) !Self {
             var entries: std.ArrayList(Entry) = .empty;
             errdefer entries.deinit(allocator);
 
-            const data = obj.content;
+            const data: []const u8 = obj.content;
 
             var offset: usize = 0;
             while (offset < data.len) {
@@ -342,7 +323,7 @@ pub fn Tree(comptime Hasher: type) type {
                 if (entry_end > data.len) break;
 
                 const entry = try entries.addOne(allocator);
-                entry.* = try Entry.deserialize(allocator, data[offset..entry_end]);
+                entry.* = try Entry.deserialize(data[offset..entry_end]);
 
                 offset = entry_end;
             }
