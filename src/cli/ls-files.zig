@@ -89,7 +89,7 @@ pub const command = Command{
     },
 };
 
-fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     var opts: zit.file.ListOptions = .{
         .cached = args.parsed.get("cached") != null,
         .others = args.parsed.get("others") != null,
@@ -101,9 +101,9 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
     };
     const zero_terminated = args.parsed.get("z") != null;
 
-    var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
+    var repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
         error.GitDirNotFound => {
-            try stderr.print(
+            try ctx.stderr.print(
                 "Repository not found (cannot find .git in current directory or any of the parents).\n",
                 .{},
             );
@@ -111,28 +111,28 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
         },
         else => return err,
     };
-    defer repo.deinit(allocator);
+    defer repo.deinit(ctx.allocator);
 
-    var files = try zit.file.list(allocator, Sha1, repo, &opts);
+    var files = try zit.file.list(ctx.allocator, Sha1, repo, &opts);
     defer {
         for (files.items) |*f| {
-            f.deinit(allocator);
+            f.deinit(ctx.allocator);
         }
-        files.deinit(allocator);
+        files.deinit(ctx.allocator);
     }
 
     for (files.items) |file| {
         if (opts.stage_info and file.merge_stage != null) {
-            try stdout.print("{f} {f} {d}\t{s}", .{
+            try ctx.stdout.print("{f} {f} {d}\t{s}", .{
                 file.mode.?,
                 file.object_id.?,
                 @intFromEnum(file.merge_stage.?),
                 file.path,
             });
         } else {
-            try stdout.print("{s}", .{file.path});
+            try ctx.stdout.print("{s}", .{file.path});
         }
 
-        try if (zero_terminated) stdout.print("\x00", .{}) else stdout.print("\n", .{});
+        try if (zero_terminated) ctx.stdout.print("\x00", .{}) else ctx.stdout.print("\n", .{});
     }
 }

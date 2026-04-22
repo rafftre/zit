@@ -39,7 +39,7 @@ pub fn build(b: *std.Build) void {
         .name = "zit",
         .root_module = exe_mod,
     });
-    exe.linkLibC();
+    //exe.linkLibC();
     b.installArtifact(exe);
 
     const doc_obj = b.addObject(.{

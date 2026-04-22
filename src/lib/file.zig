@@ -192,7 +192,10 @@ test "list files" {
     const allocator = std.testing.allocator;
     const test_hasher = hash.Sha1;
 
-    var repo: Repository(test_hasher) = try .open(allocator, .git, null);
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+
+    var repo: Repository(test_hasher) = try .open(allocator, .git, null, env);
     defer repo.deinit(allocator);
 
     var opts: ListOptions = .{

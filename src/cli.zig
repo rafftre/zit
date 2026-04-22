@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const build_options = @import("build_options");
+const zit = @import("zit");
 const Command = @import("cli/Command.zig");
 
 const Allocator = std.mem.Allocator;
@@ -57,14 +58,22 @@ pub fn dispatchCommand(
     stderr: *std.Io.Writer,
     name: [:0]const u8,
     iter: *std.process.ArgIterator,
+    env: std.process.EnvMap,
 ) !void {
     for (command_list) |cmd| {
         if (std.mem.eql(u8, cmd.name, name)) {
-            var cmd_args = Command.Arguments.init(allocator);
-            defer cmd_args.deinit(allocator);
+            var args = Command.Arguments.init(allocator);
+            defer args.deinit(allocator);
 
-            try cmd_args.parse(allocator, stderr, cmd, iter);
-            try cmd.run(allocator, stdout, stderr, cmd_args);
+            const ctx: Command.Context = .{
+                .allocator = allocator,
+                .stdout = stdout,
+                .stderr = stderr,
+                .env = env,
+            };
+
+            try args.parse(allocator, stderr, cmd, iter);
+            try cmd.run(ctx, args);
             return;
         }
     }

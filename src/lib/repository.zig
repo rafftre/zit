@@ -29,9 +29,9 @@ pub fn Repository(comptime Hasher: type) type {
 
         /// Opens an existing repository.
         /// If `start_path` is missing, the current directory will be used to start searching for the repository.
-        pub fn open(allocator: Allocator, kind: Kind, start_path: ?[]const u8) !Self {
+        pub fn open(allocator: Allocator, kind: Kind, start_path: ?[]const u8, env: std.process.EnvMap) !Self {
             return switch (kind) {
-                .git => .{ .git = try .open(allocator, start_path) },
+                .git => .{ .git = try .open(allocator, start_path, env) },
             };
         }
 
@@ -39,10 +39,22 @@ pub fn Repository(comptime Hasher: type) type {
         /// This is supposed to be performed on first use of a new repository,
         /// but can be done again to recover corrupted structures.
         /// If `start_path` is missing, the current directory will be used to start searching for the repository.
-        pub fn setup(allocator: Allocator, kind: Kind, start_path: ?[]const u8, options: SetupOptions) !Self {
+        pub fn setup(
+            allocator: Allocator,
+            kind: Kind,
+            start_path: ?[]const u8,
+            options: SetupOptions,
+            env: std.process.EnvMap,
+        ) !Self {
             return switch (kind) {
                 .git => .{
-                    .git = try .setup(allocator, start_path, options.initial_branch, options.bare),
+                    .git = try .setup(
+                        allocator,
+                        start_path,
+                        options.initial_branch,
+                        options.bare,
+                        env,
+                    ),
                 },
             };
         }
@@ -116,7 +128,10 @@ test "git open via repository interface" {
     const allocator = std.testing.allocator;
     const Sha1Repository = Repository(hash.Sha1);
 
-    var repo: Sha1Repository = try .open(allocator, .git, null);
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+
+    var repo: Sha1Repository = try .open(allocator, .git, null, env);
     defer repo.deinit(allocator);
 
     const test_repo_path = try std.fs.cwd().realpathAlloc(allocator, ".git");

@@ -24,20 +24,20 @@ pub const command = Command{
     },
 };
 
-fn handler(_: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     if (args.positional.items.len <= 0) {
-        try cli.printGlobalUsage(stdout);
+        try cli.printGlobalUsage(ctx.stdout);
         return;
     }
 
     const topic = args.positional.items[0];
     for (cli.command_list) |cmd| {
         if (std.mem.eql(u8, cmd.name, topic)) {
-            try stdout.print("{s} - {s}\n\n", .{ cmd.name, cmd.brief });
-            try cmd.printUsage(stdout, build_options.app_name);
+            try ctx.stdout.print("{s} - {s}\n\n", .{ cmd.name, cmd.brief });
+            try cmd.printUsage(ctx.stdout, build_options.app_name);
             return;
         }
     }
 
-    try stderr.print("No help topic for '{s}'\n\n", .{topic});
+    try ctx.stderr.print("No help topic for '{s}'\n\n", .{topic});
 }

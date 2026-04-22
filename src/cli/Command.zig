@@ -7,16 +7,20 @@ const Command = @This();
 
 const std = @import("std");
 const build_options = @import("build_options");
+const zit = @import("zit");
 
 const Allocator = std.mem.Allocator;
+const Sha1 = zit.hash.Sha1;
 const usage_prefix = "  ";
 
-run: *const fn (
+pub const Context = struct {
     allocator: Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
-    args: Arguments,
-) anyerror!void,
+    env: std.process.EnvMap,
+};
+
+run: *const fn (ctx: Context, args: Arguments) anyerror!void,
 
 name: []const u8,
 brief: []const u8,

@@ -214,11 +214,20 @@ fn createTestObject(
 fn tmpRepository(allocator: Allocator, comptime Hasher: type) !Repository(Hasher) {
     const GitRepository = Repository(Hasher).GitRepository;
 
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
     const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
     defer allocator.free(test_dir_path);
 
-    return .{ .git = try GitRepository.setup(allocator, test_dir_path, "test", false) };
+    return .{ .git = try GitRepository.setup(
+        allocator,
+        test_dir_path,
+        "test",
+        false,
+        env,
+    ) };
 }

@@ -54,16 +54,16 @@ pub const command = Command{
     },
 };
 
-fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     const type_str = args.parsed.get("t");
     const use_stdin = args.parsed.get("stdin") != null;
     const literally = args.parsed.get("literally") != null;
 
     var repo: ?zit.Repository(Sha1) = null;
     if (args.parsed.get("w") != null) { // persist
-        repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
+        repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
             error.GitDirNotFound => {
-                try stderr.print(
+                try ctx.stderr.print(
                     "Repository not found (cannot find .git in current directory or any of the parents).\n",
                     .{},
                 );
@@ -74,7 +74,7 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
     }
     defer {
         if (repo) |*r| {
-            r.deinit(allocator);
+            r.deinit(ctx.allocator);
         }
     }
 
@@ -87,13 +87,13 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
         var stdin_r = stdin_file.readerStreaming(&in_buf);
         const stdin = &stdin_r.interface;
 
-        const obj_id = try zit.object.create(allocator, stdin, Sha1, repo, obj_type, literally);
-        try stdout.print("{f}\n", .{&obj_id});
+        const obj_id = try zit.object.create(ctx.allocator, stdin, Sha1, repo, obj_type, literally);
+        try ctx.stdout.print("{f}\n", .{&obj_id});
     }
 
     for (args.positional.items) |path| {
         const file = std.fs.cwd().openFile(path, .{}) catch |err| {
-            try stderr.print("Failed to open file: {s}\n", .{@errorName(err)});
+            try ctx.stderr.print("Failed to open file: {s}\n", .{@errorName(err)});
             continue;
         };
         defer file.close();
@@ -102,7 +102,7 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
         var file_r = file.readerStreaming(&file_buf);
         const reader = &file_r.interface;
 
-        const obj_id = try zit.object.create(allocator, reader, Sha1, repo, obj_type, literally);
-        try stdout.print("{f}\n", .{&obj_id});
+        const obj_id = try zit.object.create(ctx.allocator, reader, Sha1, repo, obj_type, literally);
+        try ctx.stdout.print("{f}\n", .{&obj_id});
     }
 }

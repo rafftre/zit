@@ -58,7 +58,7 @@ pub const command = Command{
     },
 };
 
-fn handler(allocator: Allocator, stdout: *std.Io.Writer, _: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     const name = if (args.positional.items.len > 0) args.positional.items[0] else null;
 
     var options: zit.SetupOptions = .{
@@ -70,8 +70,8 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, _: *std.Io.Writer, args
         options.initial_branch = branch;
     }
 
-    var repo = try zit.Repository(Sha1).setup(allocator, .git, name, options);
-    defer repo.deinit(allocator);
+    var repo = try zit.Repository(Sha1).setup(ctx.allocator, .git, name, options, ctx.env);
+    defer repo.deinit(ctx.allocator);
 
-    try stdout.print("Initialized empty Git repository in {s}\n", .{repo.name() orelse "unknown"});
+    try ctx.stdout.print("Initialized empty Git repository in {s}\n", .{repo.name() orelse "unknown"});
 }

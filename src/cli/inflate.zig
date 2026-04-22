@@ -30,13 +30,13 @@ pub const command = Command{
     },
 };
 
-fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer, args: Command.Arguments) !void {
+fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     if (args.positional.items.len > 0) {
         const obj_name = args.positional.items[0];
 
-        var repo = zit.Repository(Sha1).open(allocator, .git, null) catch |err| switch (err) {
+        var repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
             error.GitDirNotFound => {
-                try stderr.print(
+                try ctx.stderr.print(
                     "Repository not found (cannot find .git in current directory or any of the parents).\n",
                     .{},
                 );
@@ -44,17 +44,17 @@ fn handler(allocator: Allocator, stdout: *std.Io.Writer, stderr: *std.Io.Writer,
             },
             else => return err,
         };
-        defer repo.deinit(allocator);
+        defer repo.deinit(ctx.allocator);
 
         const obj_id = try zit.Repository(Sha1).Object.Id.fromHex(obj_name);
 
-        var bytes: std.Io.Writer.Allocating = .init(allocator);
+        var bytes: std.Io.Writer.Allocating = .init(ctx.allocator);
         defer bytes.deinit();
 
-        try repo.readObject(allocator, &bytes.writer, &obj_id);
+        try repo.readObject(ctx.allocator, &bytes.writer, &obj_id);
 
-        try stdout.print("{s}", .{bytes.written()});
+        try ctx.stdout.print("{s}", .{bytes.written()});
     } else {
-        try stderr.print("<object> is required.\n", .{});
+        try ctx.stderr.print("<object> is required.\n", .{});
     }
 }

@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
 const std = @import("std");
+const builtin = @import("builtin");
 const flate = std.compress.flate;
 const cwd = std.fs.cwd;
 const path = std.fs.path;
 const Allocator = std.mem.Allocator;
 
-const env = @import("util/env.zig");
 const hash = @import("util/hash.zig");
 const newflate = @import("newflate/newflate.zig");
 
@@ -22,6 +22,9 @@ const heads_dir_name = "heads";
 const tags_dir_name = "tags";
 const index_file_name = "index";
 const head_file_name = "HEAD";
+
+const GIT_DIR_ENV = "GIT_DIR";
+const GIT_OBJECT_DIR_ENV = "GIT_OBJECT_DIRECTORY";
 
 /// Returns a repository implementation that uses the file-system
 /// with the Git rules and uses the specified hasher function.
@@ -40,12 +43,16 @@ pub fn GitRepository(comptime Hasher: type) type {
         /// Opens a Git repository searching an existing .git directory.
         /// Search the path of the .git directory from from `start_path` or the current directory.
         /// Use `deinit` to free up used resources.
-        pub fn open(allocator: Allocator, start_path: ?[]const u8) !Self {
-            const git_dir_path = try env.getEnv(allocator, env.GIT_DIR) orelse
-                try searchGitDirPath(allocator, start_path);
+        pub fn open(allocator: Allocator, start_path: ?[]const u8, env: std.process.EnvMap) !Self {
+            const git_dir_path = if (env.get(GIT_DIR_ENV)) |p|
+                try allocator.dupe(u8, p)
+            else
+                try searchGitDirPath(allocator, start_path, env);
             errdefer allocator.free(git_dir_path);
 
-            const objects_dir_path = try env.getEnv(allocator, env.GIT_OBJECT_DIR) orelse
+            const objects_dir_path = if (env.get(GIT_OBJECT_DIR_ENV)) |p|
+                try allocator.dupe(u8, p)
+            else
                 try path.join(allocator, &.{ git_dir_path, objects_dir_name });
             errdefer allocator.free(objects_dir_path);
 
@@ -76,11 +83,14 @@ pub fn GitRepository(comptime Hasher: type) type {
             start_path: ?[]const u8,
             initial_branch_name: []const u8,
             bare: bool,
+            env: std.process.EnvMap,
         ) !Self {
-            const git_dir_path = try resolveGitDirPathToCreate(allocator, start_path, bare);
+            const git_dir_path = try resolveGitDirPathToCreate(allocator, start_path, bare, env);
             errdefer allocator.free(git_dir_path);
 
-            const objects_dir_path = try env.getEnv(allocator, env.GIT_OBJECT_DIR) orelse
+            const objects_dir_path = if (env.get(GIT_OBJECT_DIR_ENV)) |p|
+                try allocator.dupe(u8, p)
+            else
                 try path.join(allocator, &.{ git_dir_path, objects_dir_name });
             errdefer allocator.free(objects_dir_path);
 
@@ -230,7 +240,12 @@ pub fn GitRepository(comptime Hasher: type) type {
 // The directory at `start_path` will be created if not exists.
 // When `bare` is true uses the destination path as the .git directory.
 // Caller owns the returned memory.
-fn resolveGitDirPathToCreate(allocator: Allocator, start_path: ?[]const u8, bare: bool) ![]u8 {
+fn resolveGitDirPathToCreate(
+    allocator: Allocator,
+    start_path: ?[]const u8,
+    bare: bool,
+    env: std.process.EnvMap,
+) ![]u8 {
     if (start_path) |n| {
         try cwd().makePath(n);
     }
@@ -241,9 +256,7 @@ fn resolveGitDirPathToCreate(allocator: Allocator, start_path: ?[]const u8, bare
     }
     defer allocator.free(start_dir_path);
 
-    const git_dir_path = try env.getEnv(allocator, env.GIT_DIR);
-    if (git_dir_path) |p| {
-        defer allocator.free(p);
+    if (env.get(GIT_DIR_ENV)) |p| {
         return try std.fs.realpathAlloc(allocator, p);
     }
 
@@ -258,15 +271,12 @@ fn resolveGitDirPathToCreate(allocator: Allocator, start_path: ?[]const u8, bare
 // Search the path of the .git directory from the current one or from `start_path` if it has a value.
 // Walks up the directory tree until it gets to ~ or /, looking for a .git directory at every step.
 // Caller owns the returned memory.
-fn searchGitDirPath(allocator: Allocator, start_path: ?[]const u8) ![]u8 {
+fn searchGitDirPath(allocator: Allocator, start_path: ?[]const u8, env: std.process.EnvMap) ![]u8 {
     var curr_dir = try cwd().openDir(start_path orelse ".", .{});
     errdefer curr_dir.close();
 
     const root_path = try curr_dir.realpathAlloc(allocator, "/");
     defer allocator.free(root_path);
-
-    const home_path = try env.getHomeDir(allocator);
-    defer allocator.free(home_path);
 
     var curr_buf: [std.fs.max_path_bytes]u8 = undefined;
     while (true) {
@@ -274,9 +284,12 @@ fn searchGitDirPath(allocator: Allocator, start_path: ?[]const u8) ![]u8 {
         std.log.debug("Searching {s} in {s}", .{ default_git_dir_name, current_path });
 
         var git_dir = curr_dir.openDir(default_git_dir_name, .{}) catch {
-            if (std.mem.eql(u8, home_path, current_path)) {
-                std.log.debug("Reached user home, halting {s} search", .{default_git_dir_name});
-                return error.GitDirNotFound;
+            const home_env_name = getHomeEnvKey();
+            if (env.get(home_env_name)) |home_path| {
+                if (std.mem.eql(u8, home_path, current_path)) {
+                    std.log.debug("Reached user home, halting {s} search", .{default_git_dir_name});
+                    return error.GitDirNotFound;
+                }
             }
 
             if (std.mem.eql(u8, root_path, current_path)) {
@@ -297,6 +310,18 @@ fn searchGitDirPath(allocator: Allocator, start_path: ?[]const u8) ![]u8 {
     return error.GitDirNotFound;
 }
 
+/// Returns the environment variable for the user home directory based on the OS.
+fn getHomeEnvKey() []const u8 {
+    if (builtin.os.tag == .windows) {
+        // Note: in some versions of Windows HOME variable may be defined,
+        // but it contains something as "/c/Users/name" and this may cause a
+        // failure while comparing its content to paths retrived from opened
+        // directories (that are in the form "C:\Users\name")
+        return "USERPROFILE";
+    }
+    return "HOME";
+}
+
 // Creates and opens the HEAD file pointing to the specified branch
 fn initHead(git_dir: std.fs.Dir, branch_name: []const u8) !void {
     const head_file = try git_dir.createFile(head_file_name, .{ .exclusive = true });
@@ -312,7 +337,7 @@ fn initHead(git_dir: std.fs.Dir, branch_name: []const u8) !void {
     std.log.debug("Using initial branch name {s}", .{branch_name});
 }
 
-test "git repository setup" {
+test "setup git repository" {
     const allocator = std.testing.allocator;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
@@ -324,7 +349,10 @@ test "git repository setup" {
     const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
     defer allocator.free(test_dir_path);
 
-    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false);
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+
+    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false, env);
     defer repo.deinit(allocator);
 
     // check head file
@@ -351,12 +379,65 @@ test "git repository setup" {
     try tmp.dir.deleteDir(default_git_dir_name ++ "/" ++ refs_dir_name ++ "/" ++ heads_dir_name);
     try tmp.dir.deleteFile(default_git_dir_name ++ "/" ++ head_file_name);
 
-    var repo2: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false);
+    var repo2: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false, env);
     defer repo2.deinit(allocator);
 
     try tmp.dir.access(default_git_dir_name ++ "/" ++ objects_dir_name ++ "/" ++ info_dir_name, .{});
     try tmp.dir.access(default_git_dir_name ++ "/" ++ refs_dir_name ++ "/" ++ heads_dir_name, .{});
     try tmp.dir.access(default_git_dir_name ++ "/" ++ head_file_name, .{});
+}
+
+test "setup git repository using GIT_DIR env" {
+    const allocator = std.testing.allocator;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makeDir("project");
+    const project_path = try tmp.dir.realpathAlloc(allocator, "project");
+    defer allocator.free(project_path);
+
+    try tmp.dir.makeDir("custom_git");
+    const custom_git_path = try tmp.dir.realpathAlloc(allocator, "custom_git");
+    defer allocator.free(custom_git_path);
+
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+    try env.put(GIT_DIR_ENV, custom_git_path);
+
+    var repo: Sha1GitRepository = try .setup(allocator, project_path, "main", false, env);
+    defer repo.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, custom_git_path, repo.git_dir_path);
+
+    var custom_git_dir = try tmp.dir.openDir("custom_git", .{});
+    defer custom_git_dir.close();
+    try custom_git_dir.access(head_file_name, .{});
+}
+
+test "setup git repository using GIT_OBJECT_DIRECTORY env" {
+    const allocator = std.testing.allocator;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
+    defer allocator.free(test_dir_path);
+
+    try tmp.dir.makeDir("custom_objects");
+    const custom_objects_path = try tmp.dir.realpathAlloc(allocator, "custom_objects");
+    defer allocator.free(custom_objects_path);
+
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+    try env.put(GIT_OBJECT_DIR_ENV, custom_objects_path);
+
+    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "main", false, env);
+    defer repo.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, custom_objects_path, repo.objects_dir_path);
 }
 
 /// Reads and decompresses the contents of `file` into `writer`.
@@ -421,7 +502,10 @@ test "write and read from a git repository" {
     const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
     defer allocator.free(test_dir_path);
 
-    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false);
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+
+    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false, env);
     defer repo.deinit(allocator);
 
     const encoded_obj = "blob 14\x00sample content";
@@ -437,4 +521,73 @@ test "write and read from a git repository" {
 
     try repo.readObject(allocator, &obj_bytes.writer, &object_id);
     try std.testing.expectEqualSlices(u8, encoded_obj, obj_bytes.written());
+}
+
+test "open git repository using GIT_DIR env" {
+    const allocator = std.testing.allocator;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makeDir(default_git_dir_name);
+    const git_dir_path = try tmp.dir.realpathAlloc(allocator, default_git_dir_name);
+    defer allocator.free(git_dir_path);
+
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+    try env.put(GIT_DIR_ENV, git_dir_path);
+
+    var repo: Sha1GitRepository = try .open(allocator, null, env);
+    defer repo.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, git_dir_path, repo.git_dir_path);
+}
+
+test "open git repository using GIT_OBJECT_DIRECTORY env" {
+    const allocator = std.testing.allocator;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makeDir(default_git_dir_name);
+    const git_dir_path = try tmp.dir.realpathAlloc(allocator, default_git_dir_name);
+    defer allocator.free(git_dir_path);
+
+    try tmp.dir.makeDir("custom_objects");
+    const objects_dir_path = try tmp.dir.realpathAlloc(allocator, "custom_objects");
+    defer allocator.free(objects_dir_path);
+
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+    try env.put(GIT_DIR_ENV, git_dir_path);
+    try env.put(GIT_OBJECT_DIR_ENV, objects_dir_path);
+
+    var repo: Sha1GitRepository = try .open(allocator, null, env);
+    defer repo.deinit(allocator);
+
+    try std.testing.expectEqualSlices(u8, objects_dir_path, repo.objects_dir_path);
+}
+
+test "open git repository search stops at HOME" {
+    const allocator = std.testing.allocator;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    try tmp.dir.makePath("home/project");
+
+    const home_path = try tmp.dir.realpathAlloc(allocator, "home");
+    defer allocator.free(home_path);
+
+    const project_path = try tmp.dir.realpathAlloc(allocator, "home/project");
+    defer allocator.free(project_path);
+
+    var env: std.process.EnvMap = .init(allocator);
+    defer env.deinit();
+    try env.put("HOME", home_path);
+
+    try std.testing.expectError(error.GitDirNotFound, Sha1GitRepository.open(allocator, project_path, env));
 }

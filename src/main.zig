@@ -3,6 +3,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const zit = @import("zit");
 
 const Allocator = std.mem.Allocator;
 
@@ -35,6 +36,9 @@ pub fn main() !void {
     var stderr_w = stderr_file.writerStreaming(&err_buf);
     const stderr = &stderr_w.interface;
 
+    var env: std.process.EnvMap = .init(gpa);
+    defer env.deinit();
+
     var arg_iter = try std.process.argsWithAllocator(gpa);
     defer arg_iter.deinit();
 
@@ -46,7 +50,7 @@ pub fn main() !void {
         return;
     };
 
-    cli.dispatchCommand(gpa, stdout, stderr, command_name, &arg_iter) catch |err| {
+    cli.dispatchCommand(gpa, stdout, stderr, command_name, &arg_iter, env) catch |err| {
         std.log.debug("Failed to run command: {s}", .{@errorName(err)});
         cli.fail(stdout, stderr);
     };
