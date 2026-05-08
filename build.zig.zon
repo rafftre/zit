@@ -5,10 +5,9 @@
     .name = .zit,
     .version = "0.5.0",
     .fingerprint = 0x4570515fd4addc18,
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
 
-    .dependencies = .{
-    },
+    .dependencies = .{},
 
     .paths = .{
         "build.zig",
