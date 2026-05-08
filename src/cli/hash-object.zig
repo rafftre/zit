@@ -6,6 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Sha1 = zit.hash.Sha1;
 
 /// The hash-object command.
@@ -61,7 +62,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
 
     var repo: ?zit.Repository(Sha1) = null;
     if (args.parsed.get("w") != null) { // persist
-        repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
+        repo = zit.Repository(Sha1).open(ctx.io, .git, null, ctx.env, ctx.allocator) catch |err| switch (err) {
             error.GitDirNotFound => {
                 try ctx.stderr.print(
                     "Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -81,28 +82,28 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     const obj_type = zit.object.Type.parse(type_str) orelse .blob;
 
     if (use_stdin) {
-        const stdin_file: std.fs.File = .stdin();
+        const stdin_file: std.Io.File = .stdin();
 
         var in_buf: [1024]u8 = undefined;
-        var stdin_r = stdin_file.readerStreaming(&in_buf);
+        var stdin_r = stdin_file.readerStreaming(ctx.io, &in_buf);
         const stdin = &stdin_r.interface;
 
-        const obj_id = try zit.object.create(ctx.allocator, stdin, Sha1, repo, obj_type, literally);
+        const obj_id = try zit.object.create(ctx.io, ctx.allocator, stdin, Sha1, repo, obj_type, literally);
         try ctx.stdout.print("{f}\n", .{&obj_id});
     }
 
     for (args.positional.items) |path| {
-        const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        const file = std.Io.Dir.cwd().openFile(ctx.io, path, .{}) catch |err| {
             try ctx.stderr.print("Failed to open file: {s}\n", .{@errorName(err)});
             continue;
         };
-        defer file.close();
+        defer file.close(ctx.io);
 
         var file_buf: [4 * 1024]u8 = undefined;
-        var file_r = file.readerStreaming(&file_buf);
+        var file_r = file.readerStreaming(ctx.io, &file_buf);
         const reader = &file_r.interface;
 
-        const obj_id = try zit.object.create(ctx.allocator, reader, Sha1, repo, obj_type, literally);
+        const obj_id = try zit.object.create(ctx.io, ctx.allocator, reader, Sha1, repo, obj_type, literally);
         try ctx.stdout.print("{f}\n", .{&obj_id});
     }
 }

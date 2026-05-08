@@ -621,21 +621,21 @@ fn IndexEntry(comptime hash_size: usize) type {
         }
 
         /// Returns true if the entry is changed in comparison to the provided file stats.
-        pub fn isChanged(self: *const Self, stat: std.fs.File.Stat) bool {
+        pub fn isChanged(self: *const Self, stat: std.Io.File.Stat) bool {
             if (self.extended_flags) |ext| {
                 if (ext.intent_to_add and self.flags.extended) {
                     return true;
                 }
             }
 
-            // FIXME: check mode changes, see ce_match_stat_basic
+            // FIXME: check mode changes
 
-            const ctime: i128 = @intCast(self.ctime);
-            const mtime: i128 = @intCast(self.mtime);
+            const ctime: i96 = @intCast(self.ctime);
+            const mtime: i96 = @intCast(self.mtime);
 
             return self.file_size != stat.size or
-                ctime != stat.ctime or
-                mtime != stat.mtime;
+                ctime != stat.ctime.nanoseconds or
+                mtime != stat.mtime.nanoseconds;
         }
 
         /// Returns true if the entry has a merge stage.

@@ -15,13 +15,19 @@ pub const FileType = enum(u4) {
 
     /// Returns the type for the given integer.
     pub fn of(num: u4) FileType {
-        return std.meta.intToEnum(FileType, num) catch .indeterminate;
+        return switch (num) {
+            0b100 => @as(FileType, .directory),
+            0b1000 => @as(FileType, .regular_file),
+            0b1010 => @as(FileType, .symbolic_link),
+            0b1110 => @as(FileType, .gitlink),
+            else => @as(FileType, .indeterminate),
+        };
     }
 
     /// Returns the type for the given string (representing an octal number).
     pub fn parse(octal: []const u8) !FileType {
         const n = try std.fmt.parseInt(u4, octal, 8);
-        return std.meta.intToEnum(FileType, n) catch .indeterminate;
+        return of(n);
     }
 };
 
@@ -90,9 +96,9 @@ pub const AccessRights = packed struct(u3) {
         return a.read == b.read and a.write == b.write and a.execute == b.execute;
     }
 
-    /// Formatting method for use with `std.io.Writer.print`.
+    /// Formatting method for use with `std.Io.Writer.print`.
     /// Outputs access rights as a string in the Unix format (i.e. "rwx").
-    pub fn format(self: *const AccessRights, writer: *std.io.Writer) !void {
+    pub fn format(self: *const AccessRights, writer: *std.Io.Writer) !void {
         try writer.print("{s}{s}{s}", .{
             if (self.read) "r" else "-",
             if (self.write) "w" else "-",
@@ -215,10 +221,10 @@ pub const Permissions = packed struct(u9) {
         };
     }
 
-    /// Formatting method for use with `std.io.Writer.print`.
+    /// Formatting method for use with `std.Io.Writer.print`.
     /// Outputs content as a string.
     /// Outputs permissions as a string in the Unix format (i.e. "rwxrwxrwx").
-    pub fn format(self: *const Permissions, writer: *std.io.Writer) !void {
+    pub fn format(self: *const Permissions, writer: *std.Io.Writer) !void {
         try writer.print("{f}{f}{f}", .{ self.user, self.group, self.others });
     }
 };
@@ -396,10 +402,10 @@ pub const FileMode = packed struct(u16) {
         };
     }
 
-    /// Formatting method for use with `std.io.Writer.print`.
+    /// Formatting method for use with `std.Io.Writer.print`.
     /// Outputs content as a string.
     /// Outputs file mode as an integer (i.e. "160764").
-    pub fn format(self: *const FileMode, writer: *std.io.Writer) !void {
+    pub fn format(self: *const FileMode, writer: *std.Io.Writer) !void {
         const nil_bits: u3 = @bitCast(self.nil);
         const perm_bits: u9 = @bitCast(self.permissions);
         try writer.print("{o:0>2}{o}{o:0>3}", .{ self.type, nil_bits, perm_bits });

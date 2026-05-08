@@ -11,35 +11,24 @@ const cli = @import("cli.zig");
 
 var debug_allocator: std.heap.DebugAllocator(.{}) = .init;
 
-pub fn main() !void {
-    const gpa, const is_debug = gpa: {
-        if (builtin.target.os.tag == .wasi) break :gpa .{ std.heap.wasm_allocator, false };
-        break :gpa switch (builtin.mode) {
-            .Debug => .{ debug_allocator.allocator(), true },
-            .ReleaseFast,
-            .ReleaseSafe,
-            .ReleaseSmall,
-            => .{ std.heap.smp_allocator, false },
-        };
-    };
-    defer if (is_debug) {
-        _ = debug_allocator.deinit();
-    };
+pub fn main(init: std.process.Init) !void {
+    const gpa = init.gpa;
+    const io = init.io;
 
     var out_buf: [1024]u8 = undefined;
-    const stdout_file: std.fs.File = .stdout();
-    var stdout_w = stdout_file.writerStreaming(&out_buf);
+    const stdout_file: std.Io.File = .stdout();
+    var stdout_w = stdout_file.writerStreaming(io, &out_buf);
     const stdout = &stdout_w.interface;
 
     var err_buf: [1024]u8 = undefined;
-    const stderr_file: std.fs.File = .stderr();
-    var stderr_w = stderr_file.writerStreaming(&err_buf);
+    const stderr_file: std.Io.File = .stderr();
+    var stderr_w = stderr_file.writerStreaming(io, &err_buf);
     const stderr = &stderr_w.interface;
 
-    var env: std.process.EnvMap = .init(gpa);
-    defer env.deinit();
-
-    var arg_iter = try std.process.argsWithAllocator(gpa);
+    var arg_iter = try std.process.Args.iterateAllocator(
+        init.minimal.args,
+        init.arena.allocator(),
+    );
     defer arg_iter.deinit();
 
     _ = arg_iter.next(); // skip program name
@@ -50,7 +39,15 @@ pub fn main() !void {
         return;
     };
 
-    cli.dispatchCommand(gpa, stdout, stderr, command_name, &arg_iter, env) catch |err| {
+    cli.dispatchCommand(
+        io,
+        gpa,
+        stdout,
+        stderr,
+        command_name,
+        &arg_iter,
+        init.environ_map,
+    ) catch |err| {
         std.log.debug("Failed to run command: {s}", .{@errorName(err)});
         cli.fail(stdout, stderr);
     };

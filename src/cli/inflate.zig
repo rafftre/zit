@@ -6,6 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Sha1 = zit.hash.Sha1;
 
 /// The inflate command.
@@ -34,7 +35,13 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     if (args.positional.items.len > 0) {
         const obj_name = args.positional.items[0];
 
-        var repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
+        var repo = zit.Repository(Sha1).open(
+            ctx.io,
+            .git,
+            null,
+            ctx.env,
+            ctx.allocator,
+        ) catch |err| switch (err) {
             error.GitDirNotFound => {
                 try ctx.stderr.print(
                     "Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -51,7 +58,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
         var bytes: std.Io.Writer.Allocating = .init(ctx.allocator);
         defer bytes.deinit();
 
-        try repo.readObject(ctx.allocator, &bytes.writer, &obj_id);
+        try repo.readObject(ctx.io, &bytes.writer, &obj_id, ctx.allocator);
 
         try ctx.stdout.print("{s}", .{bytes.written()});
     } else {

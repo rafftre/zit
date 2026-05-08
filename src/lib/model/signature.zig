@@ -24,7 +24,7 @@ pub const Identity = struct {
     /// Serializes the identity content.
     /// Caller owns the returned memory.
     pub fn serialize(self: *const Identity, allocator: Allocator) ![]u8 {
-        return try std.fmt.allocPrint(allocator, "{s} <{s}>", .{ self.name, self.email });
+        return std.fmt.allocPrint(allocator, "{s} <{s}>", .{ self.name, self.email });
     }
 
     /// Returns `true` if the two identities are equal.
@@ -32,8 +32,8 @@ pub const Identity = struct {
         return std.mem.eql(u8, a.name, b.name) and std.mem.eql(u8, a.email, b.email);
     }
 
-    /// Formatting method for use with `std.io.Writer.print`.
-    pub fn format(self: *const Identity, writer: *std.io.Writer) !void {
+    /// Formatting method for use with `std.Io.Writer.print`.
+    pub fn format(self: *const Identity, writer: *std.Io.Writer) !void {
         try writer.print("{s} <{s}>", .{ self.name, self.email });
     }
 };
@@ -109,7 +109,7 @@ pub const Time = struct {
         const tz_hours = @abs(self.tz_offset_minutes) / 60;
         const tz_minutes = @abs(self.tz_offset_minutes) % 60;
 
-        return try std.fmt.allocPrint(
+        return std.fmt.allocPrint(
             allocator,
             "{d} {c}{d:0>2}{d:0>2}",
             .{
@@ -126,8 +126,8 @@ pub const Time = struct {
         return a.seconds_from_epoch == b.seconds_from_epoch and a.tz_offset_minutes == b.tz_offset_minutes;
     }
 
-    /// Formatting method for use with `std.io.Writer.print`.
-    pub fn format(self: *const Time, writer: *std.io.Writer) !void {
+    /// Formatting method for use with `std.Io.Writer.print`.
+    pub fn format(self: *const Time, writer: *std.Io.Writer) !void {
         const tz_sign: u8 = if (self.tz_offset_minutes >= 0) '+' else '-';
         const tz_hours = @abs(self.tz_offset_minutes) / 60;
         const tz_minutes = @abs(self.tz_offset_minutes) % 60;
@@ -222,7 +222,7 @@ pub const Signature = struct {
 
     /// Serializes the signature content.
     pub fn serialize(self: *const Signature, allocator: Allocator) ![]u8 {
-        return try std.fmt.allocPrint(allocator, "{f} {f}", .{ self.identity, self.time });
+        return std.fmt.allocPrint(allocator, "{f} {f}", .{ self.identity, self.time });
     }
 
     /// Returns `true` if the two signatures are equal.
@@ -230,8 +230,8 @@ pub const Signature = struct {
         return a.identity.eql(&b.identity) and a.time.eql(&b.time);
     }
 
-    /// Formatting method for use with `std.io.Writer.print`.
-    pub fn format(self: *const Signature, writer: *std.io.Writer) !void {
+    /// Formatting method for use with `std.Io.Writer.print`.
+    pub fn format(self: *const Signature, writer: *std.Io.Writer) !void {
         try writer.print("{f} {f}", .{ self.identity, self.time });
     }
 };

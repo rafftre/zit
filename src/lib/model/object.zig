@@ -66,7 +66,7 @@ pub fn LooseObject(comptime Hasher: type) type {
         /// - the serialized binary data of the object.
         pub fn encode(self: *const Self, allocator: Allocator) ![]u8 {
             const type_name = self.object_type.toString() orelse "unknown";
-            return try std.fmt.allocPrint(
+            return std.fmt.allocPrint(
                 allocator,
                 "{s} {d}\x00{s}",
                 .{ type_name, self.content.len, self.content },
@@ -112,9 +112,9 @@ pub fn LooseObject(comptime Hasher: type) type {
             return .{ .object_type = typ, .content = try allocator.dupe(u8, content) };
         }
 
-        /// Formatting method for use with `std.io.Writer.print`.
+        /// Formatting method for use with `std.Io.Writer.print`.
         /// Outputs content as a string.
-        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+        pub fn format(self: *const Self, writer: *std.Io.Writer) !void {
             try writer.print("{s}", .{self.content});
         }
 
@@ -125,7 +125,7 @@ pub fn LooseObject(comptime Hasher: type) type {
 
                 if (!std.mem.eql(u8, &check_id, &obj_id)) {
                     var obj_id_buf: [Hasher.hash_size * 2]u8 = undefined;
-                    var w: std.io.Writer = .fixed(&obj_id_buf);
+                    var w: std.Io.Writer = .fixed(&obj_id_buf);
                     try hash.formatAsHex(&obj_id, &w);
 
                     std.log.debug("Found mismatching ID: '{s}'", .{obj_id});
@@ -164,7 +164,7 @@ test "format loose object" {
     const test_data = "Hello, Git blob!";
 
     var buf: [32]u8 = undefined;
-    var w: std.io.Writer = .fixed(&buf);
+    var w: std.Io.Writer = .fixed(&buf);
 
     const self: LooseObject(hash.Sha1) = .{
         .object_type = .blob,
@@ -349,9 +349,9 @@ pub fn Object(comptime Hasher: type) type {
                 return std.mem.eql(u8, &a.bytes, &b.bytes);
             }
 
-            /// Formatting method for use with `std.io.Writer.print`.
+            /// Formatting method for use with `std.Io.Writer.print`.
             /// Outputs an hexadecimal string.
-            pub fn format(id: *const Id, writer: *std.io.Writer) !void {
+            pub fn format(id: *const Id, writer: *std.Io.Writer) !void {
                 try hash.formatAsHex(@constCast(id.bytes[0..]), writer);
             }
         };
@@ -385,8 +385,8 @@ pub fn Object(comptime Hasher: type) type {
             }
         }
 
-        /// Formatting method for use with `std.io.Writer.print`.
-        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+        /// Formatting method for use with `std.Io.Writer.print`.
+        pub fn format(self: *const Self, writer: *std.Io.Writer) !void {
             switch (self.*) {
                 inline else => |*s| try s.format(writer),
             }
@@ -417,7 +417,7 @@ test "object id" {
     try std.testing.expectEqualStrings(test_chars, hex);
 
     var buf: [hash.Sha1.hash_size * 2]u8 = undefined;
-    var w: std.io.Writer = .fixed(&buf);
+    var w: std.Io.Writer = .fixed(&buf);
 
     try w.print("{f}", .{test_oid});
     try std.testing.expectEqualStrings(test_chars, w.buffered());

@@ -5,6 +5,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const fs = @import("model/util/fs.zig");
 const hash = @import("model/util/hash.zig");
@@ -76,6 +77,7 @@ pub const ListOptions = struct {
 /// Forces stage info when unmerged files are requested.
 /// Caller owns the returned memory.
 pub fn list(
+    io: Io,
     allocator: Allocator,
     /// The type of hasher.
     comptime Hasher: type,
@@ -85,7 +87,7 @@ pub fn list(
 ) !std.ArrayList(File(Hasher)) {
     opts.check();
 
-    var index = try repository.loadIndex(allocator);
+    var index = try repository.loadIndex(io, allocator);
     defer index.deinit(allocator);
 
     var res: std.ArrayList(File(Hasher)) = .empty;
@@ -97,14 +99,14 @@ pub fn list(
             return error.MissingWorktree;
         }
 
-        var dir = try std.fs.cwd().openDir(worktree.?, .{ .iterate = true });
-        defer dir.close();
+        var dir = try std.Io.Dir.cwd().openDir(io, worktree.?, .{ .iterate = true });
+        defer dir.close(io);
 
         if (opts.others) {
             var walker = try dir.walk(allocator);
             defer walker.deinit();
 
-            while (try walker.next()) |entry| {
+            while (try walker.next(io)) |entry| {
                 if (entry.kind == .file and !repository.isInternalPath(entry.path) and !index.contains(entry.path)) {
                     try appendUntrackedFile(allocator, Hasher, &res, entry.path);
                 }
@@ -115,7 +117,7 @@ pub fn list(
             var walker = try dir.walk(allocator);
             defer walker.deinit();
 
-            while (try walker.next()) |entry| {
+            while (try walker.next(io)) |entry| {
                 if (!repository.isInternalPath(entry.path) and index.containsPrefix(entry.path, true)) {
                     try appendUntrackedFile(allocator, Hasher, &res, entry.path);
                 }
@@ -128,12 +130,12 @@ pub fn list(
     if (opts.cached or opts.stage_info or opts.deleted or opts.modified) {
         for (index.entries.items) |entry| {
             if (opts.deleted) {
-                std.fs.cwd().access(entry.path, .{}) catch |err| switch (err) {
+                std.Io.Dir.cwd().access(io, entry.path, .{}) catch |err| switch (err) {
                     error.FileNotFound => try appendTrackedFile(allocator, Hasher, &res, entry, false),
                     else => return err,
                 };
             } else if (opts.modified) {
-                const stat = std.fs.cwd().statFile(entry.path) catch |err| switch (err) {
+                const stat = std.Io.Dir.cwd().statFile(io, entry.path, .{ .follow_symlinks = false }) catch |err| switch (err) {
                     error.FileNotFound => {
                         try appendTrackedFile(allocator, Hasher, &res, entry, false);
                         continue;
@@ -190,12 +192,15 @@ fn appendUntrackedFile(
 
 test "list files" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const test_hasher = hash.Sha1;
 
-    var env: std.process.EnvMap = .init(allocator);
+    // TODO: create tmp index file and test with it
+
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
 
-    var repo: Repository(test_hasher) = try .open(allocator, .git, null, env);
+    var repo: Repository(test_hasher) = try .open(io, .git, null, &env, allocator);
     defer repo.deinit(allocator);
 
     var opts: ListOptions = .{
@@ -203,7 +208,7 @@ test "list files" {
         .others = true,
     };
 
-    var file_list = try list(allocator, test_hasher, repo, &opts);
+    var file_list = try list(io, allocator, test_hasher, repo, &opts);
     defer {
         for (file_list.items) |*f| {
             f.deinit(allocator);

@@ -146,9 +146,9 @@ pub fn TreeEntry(comptime Hasher: type) type {
             return std.math.order(lhs.name.len, rhs.name.len) == .lt;
         }
 
-        /// Formatting method for use with `std.io.Writer.print`.
+        /// Formatting method for use with `std.Io.Writer.print`.
         /// Outputs a single-line string with the format "mode type object-id name".
-        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+        pub fn format(self: *const Self, writer: *std.Io.Writer) !void {
             const mode_label = switch (self.entry_type) {
                 .none => "",
                 .tree => "tree",
@@ -366,9 +366,9 @@ pub fn Tree(comptime Hasher: type) type {
             };
         }
 
-        /// Formatting method for use with `std.io.Writer.print`.
+        /// Formatting method for use with `std.Io.Writer.print`.
         /// Outputs an entry for each line.
-        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+        pub fn format(self: *const Self, writer: *std.Io.Writer) !void {
             std.mem.sort(Entry, self.entries.items, {}, Entry.lessThan);
 
             for (self.entries.items) |*entry| {

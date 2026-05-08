@@ -6,6 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Sha1 = zit.hash.Sha1;
 
 /// The init command.
@@ -70,7 +71,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
         options.initial_branch = branch;
     }
 
-    var repo = try zit.Repository(Sha1).setup(ctx.allocator, .git, name, options, ctx.env);
+    var repo = try zit.Repository(Sha1).setup(ctx.io, .git, name, options, ctx.env, ctx.allocator);
     defer repo.deinit(ctx.allocator);
 
     try ctx.stdout.print("Initialized empty Git repository in {s}\n", .{repo.name() orelse "unknown"});

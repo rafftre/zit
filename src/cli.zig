@@ -7,6 +7,7 @@ const zit = @import("zit");
 const Command = @import("cli/Command.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const usage_prefix = "  ";
 
 /// The global list of all command_list.
@@ -53,19 +54,21 @@ pub fn fail(stdout: *std.Io.Writer, stderr: *std.Io.Writer) noreturn {
 
 /// Finds the requested command and executes it.
 pub fn dispatchCommand(
+    io: Io,
     allocator: Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
     name: [:0]const u8,
-    iter: *std.process.ArgIterator,
-    env: std.process.EnvMap,
+    iter: *std.process.Args.Iterator,
+    env: *std.process.Environ.Map,
 ) !void {
     for (command_list) |cmd| {
         if (std.mem.eql(u8, cmd.name, name)) {
-            var args = Command.Arguments.init(allocator);
+            var args: Command.Arguments = .{};
             defer args.deinit(allocator);
 
             const ctx: Command.Context = .{
+                .io = io,
                 .allocator = allocator,
                 .stdout = stdout,
                 .stderr = stderr,

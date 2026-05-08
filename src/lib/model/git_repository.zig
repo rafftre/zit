@@ -4,12 +4,12 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const flate = std.compress.flate;
-const cwd = std.fs.cwd;
+const cwd = std.Io.Dir.cwd;
 const path = std.fs.path;
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const hash = @import("util/hash.zig");
-const newflate = @import("newflate/newflate.zig");
 
 pub const small_file_size: usize = 32 * 1024;
 
@@ -43,11 +43,11 @@ pub fn GitRepository(comptime Hasher: type) type {
         /// Opens a Git repository searching an existing .git directory.
         /// Search the path of the .git directory from from `start_path` or the current directory.
         /// Use `deinit` to free up used resources.
-        pub fn open(allocator: Allocator, start_path: ?[]const u8, env: std.process.EnvMap) !Self {
+        pub fn open(io: Io, start_path: ?[]const u8, env: *std.process.Environ.Map, allocator: Allocator) !Self {
             const git_dir_path = if (env.get(GIT_DIR_ENV)) |p|
                 try allocator.dupe(u8, p)
             else
-                try searchGitDirPath(allocator, start_path, env);
+                try searchGitDirPath(io, start_path, env, allocator);
             errdefer allocator.free(git_dir_path);
 
             const objects_dir_path = if (env.get(GIT_OBJECT_DIR_ENV)) |p|
@@ -63,11 +63,11 @@ pub fn GitRepository(comptime Hasher: type) type {
             std.log.debug("Using Git dir {s}", .{res.git_dir_path});
 
             // opens the directory to assert that exists
-            var git_dir = try cwd().openDir(res.git_dir_path, .{});
-            defer git_dir.close();
+            var git_dir = try cwd().openDir(io, res.git_dir_path, .{});
+            defer git_dir.close(io);
 
             if (std.mem.endsWith(u8, res.git_dir_path, default_git_dir_name)) {
-                res.work_dir_path = try git_dir.realpathAlloc(allocator, "..");
+                res.work_dir_path = try realPathFileAlloc(git_dir, io, "..", allocator);
             }
 
             return res;
@@ -79,13 +79,14 @@ pub fn GitRepository(comptime Hasher: type) type {
         /// instead of using the .git directory.
         /// Use `deinit` to free up used resources.
         pub fn setup(
-            allocator: Allocator,
+            io: Io,
             start_path: ?[]const u8,
             initial_branch_name: []const u8,
             bare: bool,
-            env: std.process.EnvMap,
+            env: *std.process.Environ.Map,
+            allocator: Allocator,
         ) !Self {
-            const git_dir_path = try resolveGitDirPathToCreate(allocator, start_path, bare, env);
+            const git_dir_path = try resolveGitDirPathToCreate(io, start_path, bare, env, allocator);
             errdefer allocator.free(git_dir_path);
 
             const objects_dir_path = if (env.get(GIT_OBJECT_DIR_ENV)) |p|
@@ -100,28 +101,28 @@ pub fn GitRepository(comptime Hasher: type) type {
             };
             std.log.debug("Initializing Git dir {s}", .{res.git_dir_path});
 
-            var git_dir = try cwd().openDir(res.git_dir_path, .{});
-            defer git_dir.close();
+            var git_dir = try cwd().openDir(io, res.git_dir_path, .{});
+            defer git_dir.close(io);
 
-            var objects_dir = try cwd().makeOpenPath(res.objects_dir_path, .{});
-            defer objects_dir.close();
+            var objects_dir = try cwd().createDirPathOpen(io, res.objects_dir_path, .{});
+            defer objects_dir.close(io);
 
-            try objects_dir.makePath(info_dir_name);
-            try objects_dir.makePath(pack_dir_name);
+            try objects_dir.createDirPath(io, info_dir_name);
+            try objects_dir.createDirPath(io, pack_dir_name);
 
-            var refs_dir = try git_dir.makeOpenPath(refs_dir_name, .{});
-            defer refs_dir.close();
+            var refs_dir = try git_dir.createDirPathOpen(io, refs_dir_name, .{});
+            defer refs_dir.close(io);
 
-            try refs_dir.makePath(heads_dir_name);
-            try refs_dir.makePath(tags_dir_name);
+            try refs_dir.createDirPath(io, heads_dir_name);
+            try refs_dir.createDirPath(io, tags_dir_name);
 
-            git_dir.access(head_file_name, .{}) catch |err| switch (err) {
-                error.FileNotFound => try initHead(git_dir, initial_branch_name),
+            git_dir.access(io, head_file_name, .{}) catch |err| switch (err) {
+                error.FileNotFound => try initHead(io, git_dir, initial_branch_name),
                 else => return err,
             };
 
             if (std.mem.endsWith(u8, res.git_dir_path, default_git_dir_name)) {
-                res.work_dir_path = try git_dir.realpathAlloc(allocator, "..");
+                res.work_dir_path = try realPathFileAlloc(git_dir, io, "..", allocator);
             }
 
             return res;
@@ -163,12 +164,12 @@ pub fn GitRepository(comptime Hasher: type) type {
 
         /// Loads in memory and returns the index.
         /// Caller owns the returned memory.
-        pub fn loadIndex(self: *const Self, allocator: Allocator) !Index {
+        pub fn loadIndex(self: *const Self, io: Io, allocator: Allocator) !Index {
             const index_path = try path.join(allocator, &.{ self.git_dir_path, index_file_name });
             defer allocator.free(index_path);
 
             // TODO: handle error.FileNotFound when index file does not exists (create it?)
-            const index_content = try cwd().readFileAlloc(allocator, index_path, std.math.maxInt(usize));
+            const index_content = try cwd().readFileAlloc(io, index_path, allocator, .unlimited);
             defer allocator.free(index_content);
 
             return Index.parse(allocator, index_content);
@@ -178,9 +179,10 @@ pub fn GitRepository(comptime Hasher: type) type {
         /// Deinitialize with `deinit`.
         pub fn readObject(
             self: *const Self,
-            allocator: Allocator,
+            io: Io,
             writer: *std.Io.Writer,
             object_id: *const Object.Id,
+            allocator: Allocator,
         ) !void {
             var obj_name: [Hasher.hash_size * 2]u8 = undefined;
             try hash.toHex(@constCast(&object_id.bytes), &obj_name);
@@ -188,19 +190,20 @@ pub fn GitRepository(comptime Hasher: type) type {
             const file_path = try path.join(allocator, &.{ self.objects_dir_path, obj_name[0..2], obj_name[2..] });
             defer allocator.free(file_path);
 
-            var file = try cwd().openFile(file_path, .{});
-            defer file.close();
+            var file = try cwd().openFile(io, file_path, .{});
+            defer file.close(io);
 
-            _ = try decompressInto(&file, writer);
+            _ = try decompressInto(io, &file, writer);
         }
 
         /// Writes an object to the store.
         /// A temporary file is first created and then moved to the destination.
         pub fn writeObject(
             self: *const Self,
-            allocator: Allocator,
+            io: Io,
             reader: *std.Io.Reader,
             object_id: *const Object.Id,
+            allocator: Allocator,
         ) !void {
             var obj_name: [Hasher.hash_size * 2]u8 = undefined;
             try hash.toHex(@constCast(&object_id.bytes), &obj_name);
@@ -208,29 +211,34 @@ pub fn GitRepository(comptime Hasher: type) type {
             const dir_path = try path.join(allocator, &.{ self.objects_dir_path, obj_name[0..2] });
             defer allocator.free(dir_path);
 
-            var dest_dir = try cwd().makeOpenPath(dir_path, .{});
-            defer dest_dir.close();
+            var dest_dir = try cwd().createDirPathOpen(io, dir_path, .{});
+            defer dest_dir.close(io);
 
-            if (dest_dir.access(obj_name[2..], .{})) {
+            if (dest_dir.access(io, obj_name[2..], .{})) {
                 return; // object already exists, skip
             } else |err| switch (err) {
                 error.FileNotFound => {}, // proceed to write
                 else => return err,
             }
 
-            const temp_file_name = try generatePrefixedString(allocator, "tmp_obj_", 6);
+            const temp_file_name = try generatePrefixedString(io, "tmp_obj_", 6, allocator);
             defer allocator.free(temp_file_name);
             std.log.debug("Using temporary file {s}", .{temp_file_name});
 
-            var tmp_file = try dest_dir.createFile(temp_file_name, .{ .exclusive = true });
-            defer tmp_file.close();
+            var tmp_file = try dest_dir.createFile(io, temp_file_name, .{ .exclusive = true });
+            defer tmp_file.close(io);
 
-            _ = try compressFrom(&tmp_file, reader);
+            _ = try compressFrom(io, &tmp_file, reader);
 
-            dest_dir.rename(temp_file_name, obj_name[2..]) catch |err| switch (err) {
-                error.PathAlreadyExists => return,
+            // re-check
+            if (dest_dir.access(io, obj_name[2..], .{})) {
+                return; // object already exists, skip
+            } else |err| switch (err) {
+                error.FileNotFound => {}, // proceed to write
                 else => return err,
-            };
+            }
+
+            try std.Io.Dir.rename(dest_dir, temp_file_name, dest_dir, obj_name[2..], io);
         }
     };
 }
@@ -241,70 +249,71 @@ pub fn GitRepository(comptime Hasher: type) type {
 // When `bare` is true uses the destination path as the .git directory.
 // Caller owns the returned memory.
 fn resolveGitDirPathToCreate(
-    allocator: Allocator,
+    io: Io,
     start_path: ?[]const u8,
     bare: bool,
-    env: std.process.EnvMap,
+    env: *std.process.Environ.Map,
+    allocator: Allocator,
 ) ![]u8 {
     if (start_path) |n| {
-        try cwd().makePath(n);
+        try cwd().createDirPath(io, n);
     }
 
-    const start_dir_path = try cwd().realpathAlloc(allocator, start_path orelse ".");
+    const start_dir_path = try realPathFileAlloc(cwd(), io, start_path orelse ".", allocator);
     if (bare) {
         return start_dir_path;
     }
     defer allocator.free(start_dir_path);
 
     if (env.get(GIT_DIR_ENV)) |p| {
-        return try std.fs.realpathAlloc(allocator, p);
+        return realPathFileAlloc(cwd(), io, p, allocator);
     }
 
     const dest_path = try path.join(allocator, &.{ start_dir_path, default_git_dir_name });
     defer allocator.free(dest_path);
 
-    try cwd().makePath(dest_path);
+    try cwd().createDirPath(io, dest_path);
 
-    return try std.fs.realpathAlloc(allocator, dest_path);
+    return realPathFileAlloc(cwd(), io, dest_path, allocator);
 }
 
 // Search the path of the .git directory from the current one or from `start_path` if it has a value.
 // Walks up the directory tree until it gets to ~ or /, looking for a .git directory at every step.
 // Caller owns the returned memory.
-fn searchGitDirPath(allocator: Allocator, start_path: ?[]const u8, env: std.process.EnvMap) ![]u8 {
-    var curr_dir = try cwd().openDir(start_path orelse ".", .{});
-    errdefer curr_dir.close();
+fn searchGitDirPath(io: Io, start_path: ?[]const u8, env: *std.process.Environ.Map, allocator: Allocator) ![]u8 {
+    var curr_dir = try cwd().openDir(io, start_path orelse ".", .{});
+    errdefer curr_dir.close(io);
 
-    const root_path = try curr_dir.realpathAlloc(allocator, "/");
+    const root_path = try realPathFileAlloc(curr_dir, io, "/", allocator);
     defer allocator.free(root_path);
 
     var curr_buf: [std.fs.max_path_bytes]u8 = undefined;
     while (true) {
-        const current_path = try curr_dir.realpath(".", &curr_buf);
-        std.log.debug("Searching {s} in {s}", .{ default_git_dir_name, current_path });
+        const curr_path_size = try curr_dir.realPathFile(io, ".", &curr_buf);
+        std.log.debug("Searching {s} in {s}", .{ default_git_dir_name, curr_buf[0..curr_path_size] });
 
-        var git_dir = curr_dir.openDir(default_git_dir_name, .{}) catch {
+        var git_dir = curr_dir.openDir(io, default_git_dir_name, .{}) catch {
             const home_env_name = getHomeEnvKey();
             if (env.get(home_env_name)) |home_path| {
-                if (std.mem.eql(u8, home_path, current_path)) {
+                if (std.mem.eql(u8, home_path, curr_buf[0..curr_path_size])) {
                     std.log.debug("Reached user home, halting {s} search", .{default_git_dir_name});
                     return error.GitDirNotFound;
                 }
             }
 
-            if (std.mem.eql(u8, root_path, current_path)) {
+            if (std.mem.eql(u8, root_path, curr_buf[0..curr_path_size])) {
                 std.log.debug("Reached file-system root, halting {s} search", .{default_git_dir_name});
                 return error.GitDirNotFound;
             }
 
-            const parent = try curr_dir.openDir("..", .{});
-            curr_dir.close();
+            const parent = try curr_dir.openDir(io, "..", .{});
+            curr_dir.close(io);
             curr_dir = parent;
             continue;
         };
-        defer git_dir.close();
+        defer git_dir.close(io);
 
-        return git_dir.realpathAlloc(allocator, ".");
+        return realPathFileAlloc(git_dir, io, ".", allocator);
     }
 
     return error.GitDirNotFound;
@@ -323,12 +332,12 @@ fn getHomeEnvKey() []const u8 {
 }
 
 // Creates and opens the HEAD file pointing to the specified branch
-fn initHead(git_dir: std.fs.Dir, branch_name: []const u8) !void {
-    const head_file = try git_dir.createFile(head_file_name, .{ .exclusive = true });
-    defer head_file.close();
+fn initHead(io: Io, git_dir: std.Io.Dir, branch_name: []const u8) !void {
+    const head_file = try git_dir.createFile(io, head_file_name, .{ .exclusive = true });
+    defer head_file.close(io);
 
     var write_buf: [256]u8 = undefined;
-    var file_writer = head_file.writer(&write_buf);
+    var file_writer = head_file.writer(io, &write_buf);
     const writer = &file_writer.interface;
 
     try writer.print("ref: {s}/{s}/{s}\n", .{ refs_dir_name, heads_dir_name, branch_name });
@@ -339,6 +348,7 @@ fn initHead(git_dir: std.fs.Dir, branch_name: []const u8) !void {
 
 test "setup git repository" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     // init a test repository in a tmp dir
@@ -346,22 +356,22 @@ test "setup git repository" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const test_dir_path = try realPathFileAlloc(tmp.dir, io, ".", allocator);
     defer allocator.free(test_dir_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
 
-    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false, env);
+    var repo: Sha1GitRepository = try .setup(io, test_dir_path, "test", false, &env, allocator);
     defer repo.deinit(allocator);
 
     // check head file
 
-    const head_file = try tmp.dir.openFile(default_git_dir_name ++ "/" ++ head_file_name, .{});
-    defer head_file.close();
+    const head_file = try tmp.dir.openFile(io, default_git_dir_name ++ "/" ++ head_file_name, .{});
+    defer head_file.close(io);
 
     var read_buf: [256]u8 = undefined;
-    var head_r = head_file.reader(&read_buf);
+    var head_r = head_file.reader(io, &read_buf);
 
     const head_content = try head_r.interface.allocRemaining(allocator, .unlimited);
     defer allocator.free(head_content);
@@ -370,71 +380,73 @@ test "setup git repository" {
 
     // check objects dir
 
-    var objects_dir = try tmp.dir.openDir(default_git_dir_name ++ "/" ++ objects_dir_name, .{});
-    defer objects_dir.close();
+    var objects_dir = try tmp.dir.openDir(io, default_git_dir_name ++ "/" ++ objects_dir_name, .{});
+    defer objects_dir.close(io);
 
     // re-run
 
-    try objects_dir.deleteDir(info_dir_name);
-    try tmp.dir.deleteDir(default_git_dir_name ++ "/" ++ refs_dir_name ++ "/" ++ heads_dir_name);
-    try tmp.dir.deleteFile(default_git_dir_name ++ "/" ++ head_file_name);
+    try objects_dir.deleteDir(io, info_dir_name);
+    try tmp.dir.deleteDir(io, default_git_dir_name ++ "/" ++ refs_dir_name ++ "/" ++ heads_dir_name);
+    try tmp.dir.deleteFile(io, default_git_dir_name ++ "/" ++ head_file_name);
 
-    var repo2: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false, env);
+    var repo2: Sha1GitRepository = try .setup(io, test_dir_path, "test", false, &env, allocator);
     defer repo2.deinit(allocator);
 
-    try tmp.dir.access(default_git_dir_name ++ "/" ++ objects_dir_name ++ "/" ++ info_dir_name, .{});
-    try tmp.dir.access(default_git_dir_name ++ "/" ++ refs_dir_name ++ "/" ++ heads_dir_name, .{});
-    try tmp.dir.access(default_git_dir_name ++ "/" ++ head_file_name, .{});
+    try tmp.dir.access(io, default_git_dir_name ++ "/" ++ objects_dir_name ++ "/" ++ info_dir_name, .{});
+    try tmp.dir.access(io, default_git_dir_name ++ "/" ++ refs_dir_name ++ "/" ++ heads_dir_name, .{});
+    try tmp.dir.access(io, default_git_dir_name ++ "/" ++ head_file_name, .{});
 }
 
 test "setup git repository using GIT_DIR env" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makeDir("project");
-    const project_path = try tmp.dir.realpathAlloc(allocator, "project");
+    try tmp.dir.createDir(io, "project", .default_dir);
+    const project_path = try realPathFileAlloc(tmp.dir, io, "project", allocator);
     defer allocator.free(project_path);
 
-    try tmp.dir.makeDir("custom_git");
-    const custom_git_path = try tmp.dir.realpathAlloc(allocator, "custom_git");
+    try tmp.dir.createDir(io, "custom_git", .default_dir);
+    const custom_git_path = try realPathFileAlloc(tmp.dir, io, "custom_git", allocator);
     defer allocator.free(custom_git_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
     try env.put(GIT_DIR_ENV, custom_git_path);
 
-    var repo: Sha1GitRepository = try .setup(allocator, project_path, "main", false, env);
+    var repo: Sha1GitRepository = try .setup(io, project_path, "main", false, &env, allocator);
     defer repo.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, custom_git_path, repo.git_dir_path);
 
-    var custom_git_dir = try tmp.dir.openDir("custom_git", .{});
-    defer custom_git_dir.close();
-    try custom_git_dir.access(head_file_name, .{});
+    var custom_git_dir = try tmp.dir.openDir(io, "custom_git", .{});
+    defer custom_git_dir.close(io);
+    try custom_git_dir.access(io, head_file_name, .{});
 }
 
 test "setup git repository using GIT_OBJECT_DIRECTORY env" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const test_dir_path = try realPathFileAlloc(tmp.dir, io, ".", allocator);
     defer allocator.free(test_dir_path);
 
-    try tmp.dir.makeDir("custom_objects");
-    const custom_objects_path = try tmp.dir.realpathAlloc(allocator, "custom_objects");
+    try tmp.dir.createDir(io, "custom_objects", .default_dir);
+    const custom_objects_path = try realPathFileAlloc(tmp.dir, io, "custom_objects", allocator);
     defer allocator.free(custom_objects_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
     try env.put(GIT_OBJECT_DIR_ENV, custom_objects_path);
 
-    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "main", false, env);
+    var repo: Sha1GitRepository = try .setup(io, test_dir_path, "main", false, &env, allocator);
     defer repo.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, custom_objects_path, repo.objects_dir_path);
@@ -442,23 +454,23 @@ test "setup git repository using GIT_OBJECT_DIRECTORY env" {
 
 /// Reads and decompresses the contents of `file` into `writer`.
 /// Returns the total number of bytes written.
-fn decompressInto(file: *std.fs.File, writer: *std.Io.Writer) !usize {
+fn decompressInto(io: Io, file: *std.Io.File, writer: *std.Io.Writer) !usize {
     var file_buf: [4 * 1024]u8 = undefined;
-    var file_r = file.readerStreaming(&file_buf);
+    var file_r = file.readerStreaming(io, &file_buf);
     var inflate: flate.Decompress = .init(&file_r.interface, .zlib, &.{});
 
-    return try inflate.reader.streamRemaining(writer);
+    return inflate.reader.streamRemaining(writer);
 }
 
 /// Compresses and writes the content retrieved from `reader` to `file`.
 /// Returns the total number of bytes written.
-fn compressFrom(file: *std.fs.File, reader: *std.Io.Reader) !usize {
+fn compressFrom(io: Io, file: *std.Io.File, reader: *std.Io.Reader) !usize {
     var file_buf: [4 * 1024]u8 = undefined;
-    var file_w = file.writerStreaming(&file_buf);
+    var file_w = file.writerStreaming(io, &file_buf);
     const out = &file_w.interface;
 
     var flate_buf: [std.compress.flate.max_window_len]u8 = undefined;
-    var deflate: newflate.Compress = try .init(out, &flate_buf, .zlib, .default);
+    var deflate: flate.Compress = try .init(out, &flate_buf, .zlib, .default);
     const writer = &deflate.writer;
 
     const written = try reader.streamRemaining(writer);
@@ -472,9 +484,10 @@ fn compressFrom(file: *std.fs.File, reader: *std.Io.Reader) !usize {
 
 /// Generates a random string with the specified length after `prefix`.
 /// Caller owns the returned memory.
-fn generatePrefixedString(allocator: Allocator, prefix: []const u8, length: usize) ![]const u8 {
+fn generatePrefixedString(io: Io, prefix: []const u8, length: usize, allocator: Allocator) ![]const u8 {
     const chars = "abcdefghijklmnopqrstuvwxyz" ++ "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ++ "0123456789";
-    const seed: u64 = @intCast(std.time.milliTimestamp());
+
+    const seed: u64 = @intCast(std.Io.Timestamp.now(io, .real).toMilliseconds());
 
     const result = try allocator.alloc(u8, prefix.len + length);
     errdefer allocator.free(result);
@@ -494,18 +507,19 @@ fn generatePrefixedString(allocator: Allocator, prefix: []const u8, length: usiz
 
 test "write and read from a git repository" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const test_dir_path = try realPathFileAlloc(tmp.dir, io, ".", allocator);
     defer allocator.free(test_dir_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
 
-    var repo: Sha1GitRepository = try .setup(allocator, test_dir_path, "test", false, env);
+    var repo: Sha1GitRepository = try .setup(io, test_dir_path, "test", false, &env, allocator);
     defer repo.deinit(allocator);
 
     const encoded_obj = "blob 14\x00sample content";
@@ -514,31 +528,32 @@ test "write and read from a git repository" {
     const object_id: Sha1GitRepository.Object.Id = try .fromHex(obj_name);
 
     var obj_r: std.Io.Reader = .fixed(encoded_obj);
-    try repo.writeObject(allocator, &obj_r, &object_id);
+    try repo.writeObject(io, &obj_r, &object_id, allocator);
 
     var obj_bytes: std.Io.Writer.Allocating = .init(allocator);
     defer obj_bytes.deinit();
 
-    try repo.readObject(allocator, &obj_bytes.writer, &object_id);
+    try repo.readObject(io, &obj_bytes.writer, &object_id, allocator);
     try std.testing.expectEqualSlices(u8, encoded_obj, obj_bytes.written());
 }
 
 test "open git repository using GIT_DIR env" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makeDir(default_git_dir_name);
-    const git_dir_path = try tmp.dir.realpathAlloc(allocator, default_git_dir_name);
+    try tmp.dir.createDir(io, default_git_dir_name, .default_dir);
+    const git_dir_path = try realPathFileAlloc(tmp.dir, io, default_git_dir_name, allocator);
     defer allocator.free(git_dir_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
     try env.put(GIT_DIR_ENV, git_dir_path);
 
-    var repo: Sha1GitRepository = try .open(allocator, null, env);
+    var repo: Sha1GitRepository = try .open(io, null, &env, allocator);
     defer repo.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, git_dir_path, repo.git_dir_path);
@@ -546,25 +561,26 @@ test "open git repository using GIT_DIR env" {
 
 test "open git repository using GIT_OBJECT_DIRECTORY env" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makeDir(default_git_dir_name);
-    const git_dir_path = try tmp.dir.realpathAlloc(allocator, default_git_dir_name);
+    try tmp.dir.createDir(io, default_git_dir_name, .default_dir);
+    const git_dir_path = try realPathFileAlloc(tmp.dir, io, default_git_dir_name, allocator);
     defer allocator.free(git_dir_path);
 
-    try tmp.dir.makeDir("custom_objects");
-    const objects_dir_path = try tmp.dir.realpathAlloc(allocator, "custom_objects");
+    try tmp.dir.createDir(io, "custom_objects", .default_dir);
+    const objects_dir_path = try realPathFileAlloc(tmp.dir, io, "custom_objects", allocator);
     defer allocator.free(objects_dir_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
     try env.put(GIT_DIR_ENV, git_dir_path);
     try env.put(GIT_OBJECT_DIR_ENV, objects_dir_path);
 
-    var repo: Sha1GitRepository = try .open(allocator, null, env);
+    var repo: Sha1GitRepository = try .open(io, null, &env, allocator);
     defer repo.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, objects_dir_path, repo.objects_dir_path);
@@ -572,22 +588,29 @@ test "open git repository using GIT_OBJECT_DIRECTORY env" {
 
 test "open git repository search stops at HOME" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1GitRepository = GitRepository(hash.Sha1);
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makePath("home/project");
+    try tmp.dir.createDirPath(io, "home/project");
 
-    const home_path = try tmp.dir.realpathAlloc(allocator, "home");
+    const home_path = try realPathFileAlloc(tmp.dir, io, "home", allocator);
     defer allocator.free(home_path);
 
-    const project_path = try tmp.dir.realpathAlloc(allocator, "home/project");
+    const project_path = try realPathFileAlloc(tmp.dir, io, "home/project", allocator);
     defer allocator.free(project_path);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
     try env.put("HOME", home_path);
 
-    try std.testing.expectError(error.GitDirNotFound, Sha1GitRepository.open(allocator, project_path, env));
+    try std.testing.expectError(error.GitDirNotFound, Sha1GitRepository.open(io, project_path, &env, allocator));
+}
+
+fn realPathFileAlloc(dir: std.Io.Dir, io: Io, sub_path: []const u8, allocator: Allocator) ![]u8 {
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const n = try dir.realPathFile(io, sub_path, &buffer);
+    return allocator.dupe(u8, buffer[0..n]);
 }

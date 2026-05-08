@@ -228,7 +228,7 @@ test "conversion errors" {
 }
 
 /// Formats an hash as an hexadecimal string to `writer`.
-pub fn formatAsHex(hash: []u8, writer: *std.io.Writer) !void {
+pub fn formatAsHex(hash: []u8, writer: *std.Io.Writer) !void {
     for (hash) |byte| {
         _ = try writer.print("{x:0>2}", .{byte});
     }
@@ -242,7 +242,7 @@ test "format" {
     });
 
     var buf: [Sha1.hash_size * 2]u8 = undefined;
-    var w = std.io.Writer.fixed(&buf);
+    var w = std.Io.Writer.fixed(&buf);
 
     try formatAsHex(test_hash, &w);
 

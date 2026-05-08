@@ -123,8 +123,8 @@ pub fn Commit(comptime Hasher: type) type {
             };
         }
 
-        /// Formatting method for use with `std.io.Writer.print`.
-        pub fn format(self: *const Self, writer: *std.io.Writer) !void {
+        /// Formatting method for use with `std.Io.Writer.print`.
+        pub fn format(self: *const Self, writer: *std.Io.Writer) !void {
             try writer.print("tree {f}\n", .{&self.tree});
 
             for (self.parents.items) |*parent| {

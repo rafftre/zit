@@ -10,14 +10,16 @@ const build_options = @import("build_options");
 const zit = @import("zit");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Sha1 = zit.hash.Sha1;
 const usage_prefix = "  ";
 
 pub const Context = struct {
+    io: Io,
     allocator: Allocator,
     stdout: *std.Io.Writer,
     stderr: *std.Io.Writer,
-    env: std.process.EnvMap,
+    env: *std.process.Environ.Map,
 };
 
 run: *const fn (ctx: Context, args: Arguments) anyerror!void,
@@ -153,17 +155,9 @@ pub const Arguments = struct {
     /// the value setted to the string "true".
     ///
     /// Long names are used as keys when available, otherwise short names.
-    parsed: std.StringArrayHashMap([]const u8),
+    parsed: std.array_hash_map.String([]const u8) = .empty,
     /// Positional parameters, in the same order of the command line.
     positional: std.ArrayList([]const u8) = .empty,
-
-    /// Initializes this struct.
-    /// Free with `deinit`.
-    pub fn init(allocator: Allocator) Arguments {
-        return .{
-            .parsed = std.StringArrayHashMap([]const u8).init(allocator),
-        };
-    }
 
     /// Frees referenced resources.
     pub fn deinit(self: *Arguments, allocator: Allocator) void {
@@ -173,7 +167,7 @@ pub const Arguments = struct {
             allocator.free(entry.key_ptr.*);
         }
 
-        self.parsed.deinit();
+        self.parsed.deinit(allocator);
         self.positional.deinit(allocator);
     }
 
@@ -184,7 +178,7 @@ pub const Arguments = struct {
         allocator: Allocator,
         stderr: *std.Io.Writer,
         command: Command,
-        iter: *std.process.ArgIterator,
+        iter: *std.process.Args.Iterator,
     ) !void {
         if (command.parameters) |_| {
             while (iter.next()) |arg| {
@@ -211,7 +205,7 @@ pub const Arguments = struct {
         stderr: *std.Io.Writer,
         command: Command,
         arg: []const u8,
-        iter: *std.process.ArgIterator,
+        iter: *std.process.Args.Iterator,
     ) !void {
         std.log.debug("Parsing long argument '{s}'", .{arg});
 
@@ -221,7 +215,7 @@ pub const Arguments = struct {
             const opt_long = option.long.?;
 
             if (!option.require_value) {
-                try self.parsed.put(try allocator.dupe(u8, opt_long), "true");
+                try self.parsed.put(allocator, try allocator.dupe(u8, opt_long), "true");
                 return;
             }
 
@@ -234,14 +228,14 @@ pub const Arguments = struct {
                 };
 
                 const value = try stripQuotes(next);
-                try self.parsed.put(try allocator.dupe(u8, opt_long), value);
+                try self.parsed.put(allocator, try allocator.dupe(u8, opt_long), value);
 
                 return;
             } else if (long_name.len > opt_long.len and long_name[opt_long.len] == '=') {
                 // --option=value format
 
                 const value = try stripQuotes(long_name[(opt_long.len + 1)..]);
-                try self.parsed.put(try allocator.dupe(u8, opt_long), value);
+                try self.parsed.put(allocator, try allocator.dupe(u8, opt_long), value);
 
                 return;
             }
@@ -258,7 +252,7 @@ pub const Arguments = struct {
         stderr: *std.Io.Writer,
         command: Command,
         arg: []const u8,
-        iter: *std.process.ArgIterator,
+        iter: *std.process.Args.Iterator,
     ) !void {
         std.log.debug("Parsing short argument(s) '{s}'", .{arg});
 
@@ -286,11 +280,11 @@ pub const Arguments = struct {
                     };
 
                     const value = try stripQuotes(next);
-                    try self.parsed.put(try allocator.dupe(u8, key), value);
+                    try self.parsed.put(allocator, try allocator.dupe(u8, key), value);
 
                     return;
                 } else {
-                    try self.parsed.put(try allocator.dupe(u8, key), "true");
+                    try self.parsed.put(allocator, try allocator.dupe(u8, key), "true");
                     continue;
                 }
             }

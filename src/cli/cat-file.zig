@@ -7,6 +7,7 @@ const cli = @import("../cli.zig");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Sha1 = zit.hash.Sha1;
 
 /// The cat-file command.
@@ -65,7 +66,13 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     const get_size = args.parsed.get("s") != null;
     const get_type = args.parsed.get("t") != null;
 
-    var repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
+    var repo = zit.Repository(Sha1).open(
+        ctx.io,
+        .git,
+        null,
+        ctx.env,
+        ctx.allocator,
+    ) catch |err| switch (err) {
         error.GitDirNotFound => {
             try ctx.stderr.print(
                 "Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -90,7 +97,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
 
         const obj_id = try zit.Repository(Sha1).Object.Id.fromHex(obj_name);
 
-        var loose_obj = try zit.object.read(ctx.allocator, Sha1, repo, &obj_id, obj_type);
+        var loose_obj = try zit.object.read(ctx.io, ctx.allocator, Sha1, repo, &obj_id, obj_type);
         defer loose_obj.deinit(ctx.allocator);
 
         try ctx.stdout.print("{s}", .{loose_obj.content});
@@ -110,7 +117,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
                 return;
             }
 
-            var loose_obj = zit.object.read(ctx.allocator, Sha1, repo, &obj_id, null) catch |err| switch (err) {
+            var loose_obj = zit.object.read(ctx.io, ctx.allocator, Sha1, repo, &obj_id, null) catch |err| switch (err) {
                 error.FileNotFound => cli.fail(ctx.stdout, ctx.stderr),
                 else => return err,
             };
@@ -121,7 +128,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
                 return;
             }
 
-            var loose_obj = try zit.object.read(ctx.allocator, Sha1, repo, &obj_id, null);
+            var loose_obj = try zit.object.read(ctx.io, ctx.allocator, Sha1, repo, &obj_id, null);
             defer loose_obj.deinit(ctx.allocator);
 
             var obj: zit.Repository(Sha1).Object = try .deserialize(ctx.allocator, &loose_obj);
@@ -129,10 +136,10 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
 
             try ctx.stdout.print("{f}", .{obj});
         } else if (get_size) {
-            const obj_size = try zit.object.getSize(ctx.allocator, Sha1, repo, &obj_id, allow_unknown_type);
+            const obj_size = try zit.object.getSize(ctx.io, ctx.allocator, Sha1, repo, &obj_id, allow_unknown_type);
             try ctx.stdout.print("{d}\n", .{obj_size});
         } else if (get_type) {
-            const obj_type = try zit.object.getType(ctx.allocator, Sha1, repo, &obj_id, allow_unknown_type);
+            const obj_type = try zit.object.getType(ctx.io, ctx.allocator, Sha1, repo, &obj_id, allow_unknown_type);
             try ctx.stdout.print("{s}\n", .{obj_type.toString() orelse "unknown"});
         }
     } else {

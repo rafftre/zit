@@ -6,6 +6,7 @@ const zit = @import("zit");
 const Command = @import("Command.zig");
 
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const Sha1 = zit.hash.Sha1;
 
 /// The ls-files command.
@@ -101,7 +102,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     };
     const zero_terminated = args.parsed.get("z") != null;
 
-    var repo = zit.Repository(Sha1).open(ctx.allocator, .git, null, ctx.env) catch |err| switch (err) {
+    var repo = zit.Repository(Sha1).open(ctx.io, .git, null, ctx.env, ctx.allocator) catch |err| switch (err) {
         error.GitDirNotFound => {
             try ctx.stderr.print(
                 "Repository not found (cannot find .git in current directory or any of the parents).\n",
@@ -113,7 +114,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     };
     defer repo.deinit(ctx.allocator);
 
-    var files = try zit.file.list(ctx.allocator, Sha1, repo, &opts);
+    var files = try zit.file.list(ctx.io, ctx.allocator, Sha1, repo, &opts);
     defer {
         for (files.items) |*f| {
             f.deinit(ctx.allocator);

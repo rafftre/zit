@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const hash = @import("model/util/hash.zig");
 
@@ -29,9 +30,9 @@ pub fn Repository(comptime Hasher: type) type {
 
         /// Opens an existing repository.
         /// If `start_path` is missing, the current directory will be used to start searching for the repository.
-        pub fn open(allocator: Allocator, kind: Kind, start_path: ?[]const u8, env: std.process.EnvMap) !Self {
+        pub fn open(io: Io, kind: Kind, start_path: ?[]const u8, env: *std.process.Environ.Map, allocator: Allocator) !Self {
             return switch (kind) {
-                .git => .{ .git = try .open(allocator, start_path, env) },
+                .git => .{ .git = try .open(io, start_path, env, allocator) },
             };
         }
 
@@ -40,20 +41,22 @@ pub fn Repository(comptime Hasher: type) type {
         /// but can be done again to recover corrupted structures.
         /// If `start_path` is missing, the current directory will be used to start searching for the repository.
         pub fn setup(
-            allocator: Allocator,
+            io: Io,
             kind: Kind,
             start_path: ?[]const u8,
             options: SetupOptions,
-            env: std.process.EnvMap,
+            env: *std.process.Environ.Map,
+            allocator: Allocator,
         ) !Self {
             return switch (kind) {
                 .git => .{
                     .git = try .setup(
-                        allocator,
+                        io,
                         start_path,
                         options.initial_branch,
                         options.bare,
                         env,
+                        allocator,
                     ),
                 },
             };
@@ -91,21 +94,22 @@ pub fn Repository(comptime Hasher: type) type {
 
         /// Loads in memory and returns the index.
         /// Caller owns the returned memory.
-        pub fn loadIndex(self: *const Self, allocator: Allocator) !Index {
+        pub fn loadIndex(self: *const Self, io: Io, allocator: Allocator) !Index {
             switch (self.*) {
-                inline else => |*s| return try s.*.loadIndex(allocator),
+                inline else => |*s| return s.*.loadIndex(io, allocator),
             }
         }
 
         /// Reads an object from the store.
         pub fn readObject(
             self: *const Self,
-            allocator: Allocator,
+            io: Io,
             writer: *std.Io.Writer,
             object_id: *const Object.Id,
+            allocator: Allocator,
         ) !void {
             switch (self.*) {
-                inline else => |*s| try s.*.readObject(allocator, writer, object_id),
+                inline else => |*s| try s.*.readObject(io, writer, object_id, allocator),
             }
         }
 
@@ -113,12 +117,13 @@ pub fn Repository(comptime Hasher: type) type {
         /// A temporary file is first created and then moved to the destination.
         pub fn writeObject(
             self: *const Self,
-            allocator: Allocator,
+            io: Io,
             reader: *std.Io.Reader,
             object_id: *const Object.Id,
+            allocator: Allocator,
         ) !void {
             switch (self.*) {
-                inline else => |*s| try s.*.writeObject(allocator, reader, object_id),
+                inline else => |*s| try s.*.writeObject(io, reader, object_id, allocator),
             }
         }
     };
@@ -126,20 +131,29 @@ pub fn Repository(comptime Hasher: type) type {
 
 test "git open via repository interface" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
     const Sha1Repository = Repository(hash.Sha1);
 
-    var env: std.process.EnvMap = .init(allocator);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(tmp_path);
+
+    try tmp.dir.createDir(io, ".git", .default_dir);
+
+    const test_repo_path = try tmp.dir.realPathFileAlloc(io, ".git", allocator);
+    defer allocator.free(test_repo_path);
+
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
 
-    var repo: Sha1Repository = try .open(allocator, .git, null, env);
+    var repo: Sha1Repository = try .open(io, .git, tmp_path, &env, allocator);
     defer repo.deinit(allocator);
-
-    const test_repo_path = try std.fs.cwd().realpathAlloc(allocator, ".git");
-    defer allocator.free(test_repo_path);
 
     try std.testing.expectEqualStrings(test_repo_path, repo.name().?);
 
-    const test_worktree_path = try std.fs.cwd().realpathAlloc(allocator, ".");
+    const test_worktree_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(test_worktree_path);
 
     try std.testing.expectEqualStrings(test_worktree_path, repo.worktree().?);

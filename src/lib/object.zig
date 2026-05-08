@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 
 const hash = @import("model/util/hash.zig");
 const Repository = @import("repository.zig").Repository;
@@ -15,6 +16,7 @@ pub const Type = @import("model/object.zig").Type;
 /// If `repository` is provided, writes to the object store.
 /// Caller owns the returned memory.
 pub fn create(
+    io: Io,
     allocator: Allocator,
     /// A reader instance from which the content will be read.
     reader: *std.Io.Reader,
@@ -55,7 +57,7 @@ pub fn create(
 
     if (repository) |r| {
         var obj_r: std.Io.Reader = .fixed(encoded_obj);
-        try r.writeObject(allocator, &obj_r, &object_id);
+        try r.writeObject(io, &obj_r, &object_id, allocator);
     }
 
     return object_id;
@@ -65,6 +67,7 @@ pub fn create(
 /// When `expected_type` is specified, the type read must match it, otherwise an error will be returned.
 /// Caller owns the returned memory.
 pub fn read(
+    io: Io,
     allocator: Allocator,
     /// The type of hasher.
     comptime Hasher: type,
@@ -78,7 +81,7 @@ pub fn read(
     var bytes: std.Io.Writer.Allocating = .init(allocator);
     defer bytes.deinit();
 
-    try repository.readObject(allocator, &bytes.writer, object_id);
+    try repository.readObject(io, &bytes.writer, object_id, allocator);
 
     return .decode(allocator, bytes.written(), .{
         .expected_type = expected_type,
@@ -88,17 +91,18 @@ pub fn read(
 
 test "create and read object" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     const test_hasher = hash.Sha1;
     const test_hex = "cbf44659b798ad460e1bd18ded6b4784b0db4997";
     const test_content = "Hello, Zig!";
 
-    var repo = try tmpRepository(allocator, test_hasher);
+    var repo = try tmpRepository(io, allocator, test_hasher);
     defer repo.deinit(allocator);
 
-    const obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
+    const obj_id = try createTestObject(io, allocator, test_hasher, repo, test_hex, @constCast(test_content));
 
-    var read_obj = try read(allocator, test_hasher, repo, &obj_id, .blob);
+    var read_obj = try read(io, allocator, test_hasher, repo, &obj_id, .blob);
     defer read_obj.deinit(allocator);
 
     try std.testing.expectEqual(.blob, read_obj.object_type);
@@ -109,6 +113,7 @@ test "create and read object" {
 /// If `allow_unknown_type` is `true`, no error will be raised for an unknown type.
 /// Caller owns the returned memory.
 pub fn getType(
+    io: Io,
     allocator: Allocator,
     /// The type of hasher.
     comptime Hasher: type,
@@ -122,7 +127,7 @@ pub fn getType(
     var bytes: std.Io.Writer.Allocating = .init(allocator);
     defer bytes.deinit();
 
-    try repository.readObject(allocator, &bytes.writer, object_id);
+    try repository.readObject(io, &bytes.writer, object_id, allocator);
 
     var decoded: Repository(Hasher).LooseObject = try .decode(allocator, bytes.written(), .{
         .allow_unknown_type = allow_unknown_type,
@@ -134,17 +139,18 @@ pub fn getType(
 
 test "get object type" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     const test_hasher = hash.Sha1;
     const test_hex = "cbf44659b798ad460e1bd18ded6b4784b0db4997";
     const test_content = "Hello, Zig!";
 
-    var repo = try tmpRepository(allocator, test_hasher);
+    var repo = try tmpRepository(io, allocator, test_hasher);
     defer repo.deinit(allocator);
 
-    const obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
+    const obj_id = try createTestObject(io, allocator, test_hasher, repo, test_hex, @constCast(test_content));
 
-    const read_typ = try getType(allocator, test_hasher, repo, &obj_id, true);
+    const read_typ = try getType(io, allocator, test_hasher, repo, &obj_id, true);
     try std.testing.expectEqualStrings("blob", read_typ.toString().?);
 }
 
@@ -152,6 +158,7 @@ test "get object type" {
 /// If `allow_unknown_type` is `true`, no error will be raised for an unknown type.
 /// Caller owns the returned memory.
 pub fn getSize(
+    io: Io,
     allocator: Allocator,
     /// The type of hasher.
     comptime Hasher: type,
@@ -165,7 +172,7 @@ pub fn getSize(
     var bytes: std.Io.Writer.Allocating = .init(allocator);
     defer bytes.deinit();
 
-    try repository.readObject(allocator, &bytes.writer, object_id);
+    try repository.readObject(io, &bytes.writer, object_id, allocator);
 
     var decoded: Repository(Hasher).LooseObject = try .decode(allocator, bytes.written(), .{
         .allow_unknown_type = allow_unknown_type,
@@ -177,21 +184,23 @@ pub fn getSize(
 
 test "get object size" {
     const allocator = std.testing.allocator;
+    const io = std.testing.io;
 
     const test_hasher = hash.Sha1;
     const test_hex = "cbf44659b798ad460e1bd18ded6b4784b0db4997";
     const test_content = "Hello, Zig!";
 
-    var repo = try tmpRepository(allocator, test_hasher);
+    var repo = try tmpRepository(io, allocator, test_hasher);
     defer repo.deinit(allocator);
 
-    var obj_id = try createTestObject(allocator, test_hasher, repo, test_hex, @constCast(test_content));
+    var obj_id = try createTestObject(io, allocator, test_hasher, repo, test_hex, @constCast(test_content));
 
-    const obj_size = try getSize(allocator, test_hasher, repo, &obj_id, true);
+    const obj_size = try getSize(io, allocator, test_hasher, repo, &obj_id, true);
     try std.testing.expect(test_content.len == obj_size);
 }
 
 fn createTestObject(
+    io: Io,
     allocator: Allocator,
     comptime Hasher: type,
     repository: Repository(Hasher),
@@ -200,7 +209,15 @@ fn createTestObject(
 ) !Repository(Hasher).Object.Id {
     var reader: std.Io.Reader = .fixed(content);
 
-    const object_id = try create(allocator, &reader, Hasher, repository, .blob, true);
+    const object_id = try create(
+        io,
+        allocator,
+        &reader,
+        Hasher,
+        repository,
+        .blob,
+        true,
+    );
 
     const hex = try object_id.toHex(allocator);
     defer allocator.free(hex);
@@ -211,23 +228,25 @@ fn createTestObject(
 }
 
 /// Setup a new Git repository in a temp directory.
-fn tmpRepository(allocator: Allocator, comptime Hasher: type) !Repository(Hasher) {
+/// Useful for testing purposes.
+fn tmpRepository(io: Io, allocator: Allocator, comptime Hasher: type) !Repository(Hasher) {
     const GitRepository = Repository(Hasher).GitRepository;
 
-    var env: std.process.EnvMap = .init(allocator);
+    var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
 
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const test_dir_path = try tmp.dir.realpathAlloc(allocator, ".");
+    const test_dir_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
     defer allocator.free(test_dir_path);
 
     return .{ .git = try GitRepository.setup(
-        allocator,
+        io,
         test_dir_path,
         "test",
         false,
-        env,
+        &env,
+        allocator,
     ) };
 }
