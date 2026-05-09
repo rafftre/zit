@@ -4,8 +4,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const fs = @import("util/fs.zig");
 const hash = @import("util/hash.zig");
+const FileMode = @import("util/mode.zig").FileMode;
 
 const header_size = 12;
 const INDEX_SIGNATURE: u32 = std.mem.readInt(u32, "DIRC", .big);
@@ -495,7 +495,7 @@ fn IndexEntry(comptime hash_size: usize) type {
         mtime: u64,
         device: u32,
         inode: u32,
-        file_mode: fs.FileMode,
+        file_mode: FileMode,
         user_id: u32,
         group_id: u32,
         file_size: u32,
@@ -564,7 +564,7 @@ fn IndexEntry(comptime hash_size: usize) type {
                 .mtime = @as(u64, mtime_sec) * std.time.ns_per_s + mtime_nsec,
                 .device = std.mem.readInt(u32, data[16..20], .big),
                 .inode = std.mem.readInt(u32, data[20..24], .big),
-                .file_mode = fs.FileMode.of(std.mem.readInt(u16, data[26..28], .big)),
+                .file_mode = FileMode.of(std.mem.readInt(u16, data[26..28], .big)),
                 .user_id = std.mem.readInt(u32, data[28..32], .big),
                 .group_id = std.mem.readInt(u32, data[32..36], .big),
                 .file_size = std.mem.readInt(u32, data[36..40], .big),

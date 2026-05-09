@@ -5,7 +5,7 @@
 
 // Utilities
 
-pub const fs = @import("lib/model/util/fs.zig");
+pub const mode = @import("lib/model/util/mode.zig");
 pub const hash = @import("lib/model/util/hash.zig");
 
 // Data Model

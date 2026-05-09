@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2025 Raffaele Tretola <rafftre@hey.com>
 // SPDX-License-Identifier: MPL-2.0
 
-//! File-system utilities and support functions.
+//! File mode utilities and support functions.
 
 const std = @import("std");
 

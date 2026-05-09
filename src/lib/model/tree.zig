@@ -4,12 +4,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const fs = @import("util/fs.zig");
 const hash = @import("util/hash.zig");
+const FileMode = @import("util/mode.zig").FileMode;
 const Object = @import("object.zig").Object;
 const LooseObject = @import("object.zig").LooseObject;
 
-const mode_len = std.fmt.comptimePrint("{f}", .{fs.FileMode{}}).len;
+const mode_len = std.fmt.comptimePrint("{f}", .{FileMode{}}).len;
 
 /// Types of the supported file modes for tree entries.
 const TreeEntryType = enum {
@@ -21,7 +21,7 @@ const TreeEntryType = enum {
     submodule,
 
     /// Returns the type for the given file mode.
-    pub fn of(m: fs.FileMode) TreeEntryType {
+    pub fn of(m: FileMode) TreeEntryType {
         return switch (m.type) {
             .directory => .tree,
             .symbolic_link => .symlink,
@@ -32,7 +32,7 @@ const TreeEntryType = enum {
     }
 
     /// Returns the file mode for this entry type.
-    pub fn mode(self: TreeEntryType) fs.FileMode {
+    pub fn fileMode(self: TreeEntryType) FileMode {
         return switch (self) {
             .none => .{},
             .tree => .{ .type = .directory },
@@ -76,7 +76,7 @@ pub fn TreeEntry(comptime Hasher: type) type {
             var offset: usize = 0;
 
             const mode_end = std.mem.indexOf(u8, data[offset..], " ") orelse return error.InvalidFormat;
-            const parsed_mode = try fs.FileMode.parse(data[offset..(offset + mode_end)]);
+            const parsed_mode = try FileMode.parse(data[offset..(offset + mode_end)]);
             offset += mode_end + 1;
 
             const name_end = std.mem.indexOf(u8, data[offset..], "\x00") orelse return error.InvalidFormat;
@@ -104,7 +104,7 @@ pub fn TreeEntry(comptime Hasher: type) type {
             const result = try allocator.alloc(u8, total_len);
             errdefer allocator.free(result);
 
-            _ = try std.fmt.bufPrint(result[0..mode_len], "{f}", .{self.entry_type.mode()});
+            _ = try std.fmt.bufPrint(result[0..mode_len], "{f}", .{self.entry_type.fileMode()});
 
             var offset: usize = mode_len;
 
@@ -157,7 +157,7 @@ pub fn TreeEntry(comptime Hasher: type) type {
             };
 
             try writer.print("{f} {s} {f} {s}", .{
-                self.entry_type.mode(),
+                self.entry_type.fileMode(),
                 mode_label,
                 &self.object_id,
                 self.name,

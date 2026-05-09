@@ -7,8 +7,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const fs = @import("model/util/fs.zig");
 const hash = @import("model/util/hash.zig");
+const FileMode = @import("model/util/mode.zig").FileMode;
 const Repository = @import("repository.zig").Repository;
 
 /// Information about a file in the index or in the working directory.
@@ -19,7 +19,7 @@ pub fn File(comptime Hasher: type) type {
         /// Object ID (only included for tracked files)
         object_id: ?Repository(Hasher).Object.Id = null,
         /// File mode (only included for tracked files)
-        mode: ?fs.FileMode = null,
+        mode: ?FileMode = null,
         /// Stage info (only included for tracked files)
         merge_stage: ?Repository(Hasher).Index.MergeStage = null,
 
