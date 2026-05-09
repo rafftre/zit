@@ -124,11 +124,6 @@ pub fn LooseObject(comptime Hasher: type) type {
                 Hasher.hashData(bytes, &obj_id);
 
                 if (!std.mem.eql(u8, &check_id, &obj_id)) {
-                    var obj_id_buf: [Hasher.hash_size * 2]u8 = undefined;
-                    var w: std.Io.Writer = .fixed(&obj_id_buf);
-                    try hash.formatAsHex(&obj_id, &w);
-
-                    std.log.debug("Found mismatching ID: '{s}'", .{obj_id});
                     return error.HashMismatch;
                 }
             }
@@ -137,7 +132,6 @@ pub fn LooseObject(comptime Hasher: type) type {
         fn checkLength(str: []u8, expected: usize) !void {
             const len = std.fmt.parseInt(usize, str, 10) catch return error.BadLength;
             if (len != expected) {
-                std.log.debug("Found mismatching length: {d}", .{len});
                 return error.LengthMismatch;
             }
         }
@@ -145,7 +139,6 @@ pub fn LooseObject(comptime Hasher: type) type {
         fn extractType(str: []u8, expected: ?Type, allow_unknown: bool) !Type {
             const typ = std.meta.stringToEnum(Type, str) orelse {
                 if (allow_unknown) {
-                    std.log.debug("Found unknown type: '{s}'", .{str});
                     return @enumFromInt(@typeInfo(Type).@"enum".fields.len);
                 }
                 return error.UnknownType;
