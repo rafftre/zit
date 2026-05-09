@@ -175,6 +175,25 @@ pub fn GitRepository(comptime Hasher: type) type {
             return Index.parse(allocator, index_content);
         }
 
+        /// Writes the index to the file in the repository.
+        pub fn saveIndex(self: *const Self, io: Io, index: *const Index, allocator: Allocator) !void {
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
+
+            try index.writeTo(allocator, &buf);
+
+            const index_path = try path.join(allocator, &.{ self.git_dir_path, index_file_name });
+            defer allocator.free(index_path);
+
+            const file = try cwd().createFile(io, index_path, .{});
+            defer file.close(io);
+
+            var file_buf: [4 * 1024]u8 = undefined;
+            var file_w = file.writerStreaming(io, &file_buf);
+            try file_w.interface.writeAll(buf.items);
+            try file_w.interface.flush();
+        }
+
         /// Reads an object from the store.
         /// Deinitialize with `deinit`.
         pub fn readObject(

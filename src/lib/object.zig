@@ -92,12 +92,21 @@ pub fn read(
 test "create and read object" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
-
     const test_hasher = hash.Sha1;
+
     const test_hex = "cbf44659b798ad460e1bd18ded6b4784b0db4997";
     const test_content = "Hello, Zig!";
 
-    var repo = try tmpRepository(io, allocator, test_hasher);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(tmp_path);
+
+    var env: std.process.Environ.Map = .init(allocator);
+    defer env.deinit();
+
+    var repo: Repository(test_hasher) = .{ .git = try .setup(io, tmp_path, "test", false, &env, allocator) };
     defer repo.deinit(allocator);
 
     const obj_id = try createTestObject(io, allocator, test_hasher, repo, test_hex, @constCast(test_content));
@@ -140,12 +149,21 @@ pub fn getType(
 test "get object type" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
-
     const test_hasher = hash.Sha1;
+
     const test_hex = "cbf44659b798ad460e1bd18ded6b4784b0db4997";
     const test_content = "Hello, Zig!";
 
-    var repo = try tmpRepository(io, allocator, test_hasher);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(tmp_path);
+
+    var env: std.process.Environ.Map = .init(allocator);
+    defer env.deinit();
+
+    var repo: Repository(test_hasher) = .{ .git = try .setup(io, tmp_path, "test", false, &env, allocator) };
     defer repo.deinit(allocator);
 
     const obj_id = try createTestObject(io, allocator, test_hasher, repo, test_hex, @constCast(test_content));
@@ -185,12 +203,21 @@ pub fn getSize(
 test "get object size" {
     const allocator = std.testing.allocator;
     const io = std.testing.io;
-
     const test_hasher = hash.Sha1;
+
     const test_hex = "cbf44659b798ad460e1bd18ded6b4784b0db4997";
     const test_content = "Hello, Zig!";
 
-    var repo = try tmpRepository(io, allocator, test_hasher);
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(tmp_path);
+
+    var env: std.process.Environ.Map = .init(allocator);
+    defer env.deinit();
+
+    var repo: Repository(test_hasher) = .{ .git = try .setup(io, tmp_path, "test", false, &env, allocator) };
     defer repo.deinit(allocator);
 
     var obj_id = try createTestObject(io, allocator, test_hasher, repo, test_hex, @constCast(test_content));
@@ -225,28 +252,4 @@ fn createTestObject(
     try std.testing.expectEqualStrings(object_name, hex);
 
     return object_id;
-}
-
-/// Setup a new Git repository in a temp directory.
-/// Useful for testing purposes.
-fn tmpRepository(io: Io, allocator: Allocator, comptime Hasher: type) !Repository(Hasher) {
-    const GitRepository = Repository(Hasher).GitRepository;
-
-    var env: std.process.Environ.Map = .init(allocator);
-    defer env.deinit();
-
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    const test_dir_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
-    defer allocator.free(test_dir_path);
-
-    return .{ .git = try GitRepository.setup(
-        io,
-        test_dir_path,
-        "test",
-        false,
-        &env,
-        allocator,
-    ) };
 }

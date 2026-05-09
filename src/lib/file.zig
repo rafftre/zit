@@ -195,26 +195,28 @@ test "list files" {
     const io = std.testing.io;
     const test_hasher = hash.Sha1;
 
-    // TODO: create tmp index file and test with it
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", allocator);
+    defer allocator.free(tmp_path);
 
     var env: std.process.Environ.Map = .init(allocator);
     defer env.deinit();
 
-    var repo: Repository(test_hasher) = try .open(io, .git, null, &env, allocator);
+    var repo: Repository(test_hasher) = .{ .git = try .setup(io, tmp_path, "test", false, &env, allocator) };
     defer repo.deinit(allocator);
 
-    var opts: ListOptions = .{
-        .cached = true,
-        .others = true,
-    };
+    var index: Repository(test_hasher).Index = .init();
+    defer index.deinit(allocator);
+    try repo.saveIndex(io, &index, allocator);
 
+    var opts: ListOptions = .{ .cached = true };
     var file_list = try list(io, allocator, test_hasher, repo, &opts);
     defer {
-        for (file_list.items) |*f| {
-            f.deinit(allocator);
-        }
+        for (file_list.items) |*f| f.deinit(allocator);
         file_list.deinit(allocator);
     }
 
-    try std.testing.expect(file_list.items.len > 0);
+    try std.testing.expectEqual(0, file_list.items.len);
 }

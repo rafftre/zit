@@ -54,6 +54,18 @@ pub fn Index(comptime Hasher: type) type {
         pub const Flags = IndexFlags;
         pub const ExtendedFlags = ExtendedIndexFlags;
 
+        /// Initializes an empty index.
+        /// Deinitialize with `deinit`.
+        pub fn init() Self {
+            return .{
+                .signature = INDEX_SIGNATURE,
+                .version = 2,
+                .entries = .empty,
+                .extensions = .empty,
+                .checksum = std.mem.zeroes([hash_size]u8),
+            };
+        }
+
         /// Frees referenced resources.
         pub fn deinit(self: *Self, allocator: Allocator) void {
             deinitEntries(allocator, &self.entries);
@@ -78,7 +90,6 @@ pub fn Index(comptime Hasher: type) type {
         /// Deinitialize with `deinit`.
         pub fn parse(allocator: Allocator, data: []u8) !Self {
             if (data.len < header_size) {
-                // std.log.err("Found unexpected index length: {d} < {d}", .{ data.len, header_size });
                 return error.UnexpectedEndOfFile;
             }
 
@@ -87,13 +98,11 @@ pub fn Index(comptime Hasher: type) type {
             // header
             const signature = std.mem.readInt(u32, data[0..4], .big);
             if (signature != INDEX_SIGNATURE) {
-                // std.log.err("Found invalid index signature: {s}", .{data[0..4]});
                 return error.InvalidSignature;
             }
 
             const version = std.mem.readInt(u32, data[4..8], .big);
             if (version < 2 or version > 4) {
-                // std.log.err("Found unsupported index version: {d}", .{version});
                 return error.UnsupportedVersion;
             }
             std.log.debug("Index has version {d}", .{version});
@@ -140,7 +149,6 @@ pub fn Index(comptime Hasher: type) type {
 
             // checksum
             if ((pos + hash_size) != data.len) {
-                // std.log.err("Found invalid index length: {d} != {d}", .{ pos + hash_size, data.len });
                 return error.InvalidFormat;
             }
             var checksum: [hash_size]u8 = undefined;
@@ -151,7 +159,6 @@ pub fn Index(comptime Hasher: type) type {
             hasher.final(&calculated_checksum);
 
             if (!std.mem.eql(u8, &checksum, &calculated_checksum)) {
-                // std.log.err("Found invalid index checksum: {x} != {x}", .{ calculated_checksum, checksum });
                 return error.InvalidChecksum;
             }
 
@@ -531,7 +538,6 @@ fn IndexEntry(comptime hash_size: usize) type {
             len: usize,
         } {
             if (data.len < 62) {
-                // std.log.err("Found unexpected entry length: {d} < 62", .{data.len});
                 return error.UnexpectedEndOfFile;
             }
 
@@ -544,7 +550,6 @@ fn IndexEntry(comptime hash_size: usize) type {
             var extended_flags: ?ExtendedIndexFlags = null;
             if (version >= 3 and flags.extended) {
                 if (data.len < 64) {
-                    // std.log.err("Found unexpected entry length: {d} < 64", .{data.len});
                     return error.UnexpectedEndOfFile;
                 }
                 extended_flags = .of(data[62..64].*);
@@ -1132,7 +1137,6 @@ pub const IndexExtension = union(enum(u32)) {
         len: usize,
     } {
         if (data.len < 8) {
-            // std.log.err("Found unexpected extension length: {d} < 8", .{data.len});
             return error.UnexpectedEndOfFile;
         }
 
@@ -1141,7 +1145,6 @@ pub const IndexExtension = union(enum(u32)) {
 
         const total_len = 8 + size;
         if (data.len < total_len) {
-            // std.log.err("Found unexpected extension length: {d} < {d}", .{ data.len, total_len });
             return error.UnexpectedEndOfFile;
         }
 

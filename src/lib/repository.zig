@@ -100,6 +100,13 @@ pub fn Repository(comptime Hasher: type) type {
             }
         }
 
+        /// Writes the index to the file in the repository.
+        pub fn saveIndex(self: *const Self, io: Io, index: *const Index, allocator: Allocator) !void {
+            switch (self.*) {
+                inline else => |*s| try s.*.saveIndex(io, index, allocator),
+            }
+        }
+
         /// Reads an object from the store.
         pub fn readObject(
             self: *const Self,
