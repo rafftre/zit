@@ -9,7 +9,7 @@ const path = std.fs.path;
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 
-const hash = @import("util/hash.zig");
+const hash = @import("model/util/hash.zig");
 
 pub const small_file_size: usize = 32 * 1024;
 
@@ -35,10 +35,10 @@ pub fn GitRepository(comptime Hasher: type) type {
         work_dir_path: ?[]u8 = null,
 
         const Self = @This();
-        const Index = @import("index.zig").Index(Hasher);
+        const Index = @import("model/index.zig").Index(Hasher);
 
-        pub const Object = @import("object.zig").Object(Hasher);
-        pub const LooseObject = @import("object.zig").LooseObject(Hasher);
+        pub const Object = @import("model/object.zig").Object(Hasher);
+        pub const LooseObject = @import("model/object.zig").LooseObject(Hasher);
 
         /// Opens a Git repository searching an existing .git directory.
         /// Search the path of the .git directory from from `start_path` or the current directory.

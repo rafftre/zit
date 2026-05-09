@@ -104,7 +104,7 @@ The entry point is [lib.zig](./src/lib.zig).
 ## Development
 
 ### Requirements
-You need Zig v0.15.1 to compile the project.
+You need Zig v0.16 to compile the project.
 There are no dependencies.
 
 ### Building

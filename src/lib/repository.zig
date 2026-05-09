@@ -26,7 +26,7 @@ pub fn Repository(comptime Hasher: type) type {
         pub const Index = @import("model/index.zig").Index(Hasher);
         pub const Object = @import("model/object.zig").Object(Hasher);
         pub const LooseObject = @import("model/object.zig").LooseObject(Hasher);
-        pub const GitRepository = @import("model/git_repository.zig").GitRepository(Hasher);
+        pub const GitRepository = @import("git_repository.zig").GitRepository(Hasher);
 
         /// Opens an existing repository.
         /// If `start_path` is missing, the current directory will be used to start searching for the repository.
