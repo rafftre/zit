@@ -27,11 +27,11 @@ pub fn build(b: *std.Build) void {
     });
     exe_mod.addImport("zit", lib_mod);
 
-    const options = b.addOptions();
-    options.addOption([]const u8, "app_name", app_name);
-    options.addOption([]const u8, "app_description", app_description);
-    options.addOption([]const u8, "app_version", app_version);
-    exe_mod.addOptions("build_options", options);
+    const exe_options = b.addOptions();
+    exe_options.addOption([]const u8, "app_name", app_name);
+    exe_options.addOption([]const u8, "app_description", app_description);
+    exe_options.addOption([]const u8, "app_version", app_version);
+    exe_mod.addOptions("build_options", exe_options);
 
     // Artifacts ---------------------------------------------------------------
 
@@ -58,7 +58,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Test --------------------------------------------------------------------
+    // Tests -------------------------------------------------------------------
 
     const lib_unit_tests = b.addTest(.{
         .root_module = lib_mod,
@@ -67,6 +67,26 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
+
+    // CLI Integration Tests ---------------------------------------------------
+
+    const cli_test_options = b.addOptions();
+    cli_test_options.addOptionPath("zit_path", exe.getEmittedBin());
+
+    const cli_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/cli_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cli_test_mod.addOptions("build_options", cli_test_options);
+
+    const cli_tests = b.addTest(.{
+        .root_module = cli_test_mod,
+    });
+
+    const run_cli_tests = b.addRunArtifact(cli_tests);
+    const cli_test_step = b.step("test-cli", "Run CLI integration tests against a real Git");
+    cli_test_step.dependOn(&run_cli_tests.step);
 
     // Docs --------------------------------------------------------------------
 

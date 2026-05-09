@@ -111,6 +111,7 @@ There are no dependencies.
 Execute:
 - `zig build -Doptimize=ReleaseSafe` to build a release
 - `zig build test --summary all` to run tests
+- `zig build test-cli --summary all` to run tests against a real Git
 
 ### Generating the documentation
 To generate and serve the HTML documentation for the library module run:
