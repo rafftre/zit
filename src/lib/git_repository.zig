@@ -21,6 +21,7 @@ const refs_dir_name = "refs";
 const heads_dir_name = "heads";
 const tags_dir_name = "tags";
 const index_file_name = "index";
+const index_lock_file_name = "index.lock";
 const head_file_name = "HEAD";
 
 const GIT_DIR_ENV = "GIT_DIR";
@@ -175,23 +176,30 @@ pub fn GitRepository(comptime Hasher: type) type {
             return Index.parse(allocator, index_content);
         }
 
-        /// Writes the index to the file in the repository.
+        /// Writes the index to the repository atomically via a lock file.
+        /// Serializes to `.git/index.lock`, then renames it to `.git/index`.
+        /// The lock file is deleted on any error before the rename.
         pub fn saveIndex(self: *const Self, io: Io, index: *const Index, allocator: Allocator) !void {
             var buf: std.ArrayList(u8) = .empty;
             defer buf.deinit(allocator);
 
             try index.writeTo(allocator, &buf);
 
-            const index_path = try path.join(allocator, &.{ self.git_dir_path, index_file_name });
-            defer allocator.free(index_path);
+            const lock_path = try path.join(allocator, &.{ self.git_dir_path, index_lock_file_name });
+            defer allocator.free(lock_path);
 
-            const file = try cwd().createFile(io, index_path, .{});
-            defer file.close(io);
+            const lock_file = try cwd().createFile(io, lock_path, .{ .exclusive = true });
+            errdefer cwd().deleteFile(io, lock_path) catch {};
 
             var file_buf: [4 * 1024]u8 = undefined;
-            var file_w = file.writerStreaming(io, &file_buf);
+            var file_w = lock_file.writerStreaming(io, &file_buf);
             try file_w.interface.writeAll(buf.items);
             try file_w.interface.flush();
+            lock_file.close(io);
+
+            var git_dir = try cwd().openDir(io, self.git_dir_path, .{});
+            defer git_dir.close(io);
+            try std.Io.Dir.rename(git_dir, index_lock_file_name, git_dir, index_file_name, io);
         }
 
         /// Reads an object from the store.
@@ -469,6 +477,68 @@ test "setup git repository using GIT_OBJECT_DIRECTORY env" {
     defer repo.deinit(allocator);
 
     try std.testing.expectEqualSlices(u8, custom_objects_path, repo.objects_dir_path);
+}
+
+test "saveIndex renames lock file and leaves no stale lock" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+    const Sha1Index = @import("model/index.zig").Index(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const test_dir_path = try realPathFileAlloc(tmp.dir, io, ".", allocator);
+    defer allocator.free(test_dir_path);
+
+    var env: std.process.Environ.Map = .init(allocator);
+    defer env.deinit();
+
+    var repo: Sha1GitRepository = try .setup(io, test_dir_path, "main", false, &env, allocator);
+    defer repo.deinit(allocator);
+
+    var index: Sha1Index = .init();
+    defer index.deinit(allocator);
+
+    try repo.saveIndex(io, &index, allocator);
+
+    // lock file must not remain after a successful save
+    try std.testing.expectError(
+        error.FileNotFound,
+        tmp.dir.access(io, default_git_dir_name ++ "/" ++ index_lock_file_name, .{}),
+    );
+
+    // index file must exist
+    try tmp.dir.access(io, default_git_dir_name ++ "/" ++ index_file_name, .{});
+}
+
+test "saveIndex round-trips index content" {
+    const allocator = std.testing.allocator;
+    const io = std.testing.io;
+    const Sha1GitRepository = GitRepository(hash.Sha1);
+    const Sha1Index = @import("model/index.zig").Index(hash.Sha1);
+
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const test_dir_path = try realPathFileAlloc(tmp.dir, io, ".", allocator);
+    defer allocator.free(test_dir_path);
+
+    var env: std.process.Environ.Map = .init(allocator);
+    defer env.deinit();
+
+    var repo: Sha1GitRepository = try .setup(io, test_dir_path, "main", false, &env, allocator);
+    defer repo.deinit(allocator);
+
+    var index: Sha1Index = .init();
+    defer index.deinit(allocator);
+
+    try repo.saveIndex(io, &index, allocator);
+
+    var reloaded = try repo.loadIndex(io, allocator);
+    defer reloaded.deinit(allocator);
+
+    try std.testing.expectEqual(index.entries.items.len, reloaded.entries.items.len);
 }
 
 /// Reads and decompresses the contents of `file` into `writer`.

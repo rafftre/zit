@@ -130,7 +130,6 @@ Each level corresponds to a Zig package with the following structure (from highe
 - `lib/*` — Implementation of commands and rules; infrastructure code.
 - `lib/model/*` — Data model and file formats.
 - `lib/model/util/*` — Helpers and common code.
-- `lib/model/newflate/*` — Porting of `flate` compression functions from Zig 0.16 that are missing in 0.15.
 - `cli/*` — CLI commands.
 - `cli.zig` — CLI entry-point.
 - `lib.zig` — library access interface.
@@ -156,9 +155,7 @@ the caller is responsible for the lifetime of any strings stored in the object's
   As an example, the `hash-object` command reads and allocates in memory the entire input
   without any particular performance considerations.
 - _Sparse directory_ is the only supported index extension.
-
-### Open points after migration to Zig 0.15
-1. The zlib compression (_deflate_) is ported from next version of Zig in the module `lib/model/newflate` and should be removed with a future migration to Zig 0.16.
+- There is no support for standard Git exclusions.
 
 
 ## Contributing

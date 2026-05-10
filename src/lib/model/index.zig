@@ -214,10 +214,44 @@ pub fn Index(comptime Hasher: type) type {
         pub fn contains(self: *const Self, path: [:0]const u8) bool {
             return self.containsPrefix(path, false);
         }
+
+        /// Adds or replaces an entry.
+        /// If an entry with the same path and merge stage already exists it is
+        /// replaced in-place (and its memory freed). Otherwise the entry is
+        /// inserted maintaining sort order.
+        /// Takes ownership of `entry`, the caller must not call `deinit` on it.
+        pub fn upsert(self: *Self, allocator: Allocator, entry: Entry) !void {
+            for (self.entries.items, 0..) |*existing, i| {
+                if (std.mem.eql(u8, existing.path, entry.path) and
+                    existing.flags.stage == entry.flags.stage)
+                {
+                    existing.deinit(allocator);
+                    self.entries.items[i] = entry;
+                    return;
+                }
+            }
+            const insert_at = for (self.entries.items, 0..) |existing, i| {
+                if (Entry.lessThan({}, entry, existing)) break i;
+            } else self.entries.items.len;
+            try self.entries.insert(allocator, insert_at, entry);
+        }
+
+        /// Removes the entry for `path` at merge stage `.none` and frees its memory.
+        /// Returns `error.EntryNotFound` if no matching entry exists.
+        pub fn remove(self: *Self, allocator: Allocator, path: []const u8) !void {
+            for (self.entries.items, 0..) |*existing, i| {
+                if (std.mem.eql(u8, existing.path, path) and existing.flags.stage == .none) {
+                    existing.deinit(allocator);
+                    _ = self.entries.orderedRemove(i);
+                    return;
+                }
+            }
+            return error.EntryNotFound;
+        }
     };
 }
 
-test "index" {
+test "read index" {
     const allocator = std.testing.allocator;
 
     const bytes: []u8 = @constCast(&[_]u8{
@@ -316,7 +350,7 @@ test "index" {
     try std.testing.expect(std.mem.eql(u8, buf.items, bytes));
 }
 
-test "index errors" {
+test "read index errors" {
     const allocator = std.testing.allocator;
 
     const too_short1: []u8 = @constCast(&[_]u8{
@@ -633,14 +667,29 @@ fn IndexEntry(comptime hash_size: usize) type {
                 }
             }
 
-            // FIXME: check mode changes
-
             const ctime: i96 = @intCast(self.ctime);
             const mtime: i96 = @intCast(self.mtime);
 
             return self.file_size != stat.size or
                 ctime != stat.ctime.nanoseconds or
                 mtime != stat.mtime.nanoseconds;
+        }
+
+        /// Sets or clears the executable bit for all permission classes.
+        /// Returns `error.NotARegularFile` if the entry is not a regular file.
+        pub fn setExecutable(self: *Self, executable: bool) !void {
+            if (self.file_mode.type != .regular_file) return error.NotARegularFile;
+            self.file_mode.permissions.user.execute = executable;
+            self.file_mode.permissions.group.execute = executable;
+            self.file_mode.permissions.others.execute = executable;
+        }
+
+        /// Updates cached stat fields from `stat`.
+        /// After this call, `isChanged(stat)` returns `false`.
+        pub fn updateStat(self: *Self, stat: std.Io.File.Stat) void {
+            self.ctime = @intCast(stat.ctime.nanoseconds);
+            self.mtime = @intCast(stat.mtime.nanoseconds);
+            self.file_size = @intCast(stat.size);
         }
 
         /// Returns true if the entry has a merge stage.
@@ -682,7 +731,7 @@ fn calcPaddingLen(version: u32, entry_len: usize) usize {
     return 0;
 }
 
-test "entry" {
+test "read index entry" {
     const allocator = std.testing.allocator;
 
     const test_cases = [_]struct { u32, []u8, IndexEntry(hash.Sha1.hash_size) }{
@@ -885,7 +934,7 @@ fn expectEntry(allocator: Allocator, bytes: []u8, expected: *IndexEntry(hash.Sha
     try std.testing.expect(std.mem.eql(u8, entry.path, expected.path));
 }
 
-test "entry errors" {
+test "read index entry errors" {
     const allocator = std.testing.allocator;
 
     const too_short_v2: []u8 = @constCast(&[_]u8{
@@ -1013,7 +1062,7 @@ pub const IndexFlags = packed struct(u16) {
     }
 };
 
-test "flags" {
+test "read index entry flags" {
     const test_cases = [_]struct { [2]u8, IndexFlags }{
         .{ [_]u8{ 0x00, 0x00 }, .{} },
         .{ [_]u8{ 0x80, 0x00 }, .{ .assume_valid = true } },
@@ -1066,7 +1115,7 @@ pub const ExtendedIndexFlags = packed struct(u16) {
     }
 };
 
-test "extended flags" {
+test "read index extended flags" {
     const test_cases = [_]struct { [2]u8, ExtendedIndexFlags }{
         .{ [_]u8{ 0x00, 0x00 }, .{} },
         .{ [_]u8{ 0x40, 0x00 }, .{ .skip_worktree = true } },
@@ -1204,7 +1253,7 @@ pub const SparseDirectory = struct {
     }
 };
 
-test "sparse directory extension" {
+test "read sparse directory index extension" {
     const allocator = std.testing.allocator;
 
     const bytes: []u8 = @constCast(&[_]u8{
@@ -1258,7 +1307,7 @@ pub const UnknownExtension = struct {
     }
 };
 
-test "unknown extension" {
+test "read unknown index extension" {
     const allocator = std.testing.allocator;
 
     const bytes: []u8 = @constCast(&[_]u8{
@@ -1281,4 +1330,144 @@ test "unknown extension" {
 
     try parsed.extension.writeTo(allocator, &buf);
     try std.testing.expect(std.mem.eql(u8, buf.items, bytes));
+}
+
+fn makeTestEntry(allocator: Allocator, path: []const u8) !IndexEntry(hash.Sha1.hash_size) {
+    const maxU12 = std.math.maxInt(u12);
+    return .{
+        .ctime = 0,
+        .mtime = 0,
+        .device = 0,
+        .inode = 0,
+        .file_mode = .{
+            .type = .regular_file,
+            .permissions = .{
+                .user = .{ .read = true, .write = true },
+                .group = .{ .read = true },
+                .others = .{ .read = true },
+            },
+        },
+        .user_id = 0,
+        .group_id = 0,
+        .file_size = 0,
+        .hash = std.mem.zeroes([hash.Sha1.hash_size]u8),
+        .flags = .{ .name_length = @intCast(@min(path.len, maxU12)) },
+        .path = try allocator.dupeZ(u8, path),
+    };
+}
+
+test "upsert into empty index" {
+    const allocator = std.testing.allocator;
+
+    var idx = Index(hash.Sha1).init();
+    defer idx.deinit(allocator);
+
+    const entry = try makeTestEntry(allocator, "a.txt");
+    try idx.upsert(allocator, entry);
+
+    try std.testing.expectEqual(1, idx.entries.items.len);
+    try std.testing.expectEqualStrings("a.txt", idx.entries.items[0].path);
+}
+
+test "upsert replaces existing entry" {
+    const allocator = std.testing.allocator;
+
+    var idx = Index(hash.Sha1).init();
+    defer idx.deinit(allocator);
+
+    const first = try makeTestEntry(allocator, "a.txt");
+    try idx.upsert(allocator, first);
+
+    var second = try makeTestEntry(allocator, "a.txt");
+    second.file_size = 42;
+    try idx.upsert(allocator, second);
+
+    try std.testing.expectEqual(1, idx.entries.items.len);
+    try std.testing.expectEqual(42, idx.entries.items[0].file_size);
+}
+
+test "upsert maintains sorted order" {
+    const allocator = std.testing.allocator;
+
+    var idx = Index(hash.Sha1).init();
+    defer idx.deinit(allocator);
+
+    try idx.upsert(allocator, try makeTestEntry(allocator, "c.txt"));
+    try idx.upsert(allocator, try makeTestEntry(allocator, "a.txt"));
+    try idx.upsert(allocator, try makeTestEntry(allocator, "b.txt"));
+
+    try std.testing.expectEqual(3, idx.entries.items.len);
+    try std.testing.expectEqualStrings("a.txt", idx.entries.items[0].path);
+    try std.testing.expectEqualStrings("b.txt", idx.entries.items[1].path);
+    try std.testing.expectEqualStrings("c.txt", idx.entries.items[2].path);
+}
+
+test "remove existing entry" {
+    const allocator = std.testing.allocator;
+
+    var idx = Index(hash.Sha1).init();
+    defer idx.deinit(allocator);
+
+    try idx.upsert(allocator, try makeTestEntry(allocator, "a.txt"));
+    try idx.upsert(allocator, try makeTestEntry(allocator, "b.txt"));
+
+    try idx.remove(allocator, "a.txt");
+
+    try std.testing.expectEqual(1, idx.entries.items.len);
+    try std.testing.expectEqualStrings("b.txt", idx.entries.items[0].path);
+}
+
+test "remove returns error when entry not found" {
+    const allocator = std.testing.allocator;
+
+    var idx = Index(hash.Sha1).init();
+    defer idx.deinit(allocator);
+
+    try idx.upsert(allocator, try makeTestEntry(allocator, "a.txt"));
+
+    try std.testing.expectError(error.EntryNotFound, idx.remove(allocator, "missing.txt"));
+    try std.testing.expectEqual(1, idx.entries.items.len);
+}
+
+test "setExecutable sets and clears execute bit" {
+    const allocator = std.testing.allocator;
+
+    var entry = try makeTestEntry(allocator, "a.txt");
+    defer entry.deinit(allocator);
+
+    try entry.setExecutable(true);
+    try std.testing.expect(entry.file_mode.permissions.user.execute);
+    try std.testing.expect(entry.file_mode.permissions.group.execute);
+    try std.testing.expect(entry.file_mode.permissions.others.execute);
+
+    try entry.setExecutable(false);
+    try std.testing.expect(!entry.file_mode.permissions.user.execute);
+    try std.testing.expect(!entry.file_mode.permissions.group.execute);
+    try std.testing.expect(!entry.file_mode.permissions.others.execute);
+}
+
+test "setExecutable returns error for non-regular file" {
+    const allocator = std.testing.allocator;
+
+    var entry = try makeTestEntry(allocator, "a.txt");
+    defer entry.deinit(allocator);
+    entry.file_mode.type = .symbolic_link;
+
+    try std.testing.expectError(error.NotARegularFile, entry.setExecutable(true));
+}
+
+test "updateStat makes isChanged return false" {
+    const allocator = std.testing.allocator;
+
+    var entry = try makeTestEntry(allocator, "a.txt");
+    defer entry.deinit(allocator);
+
+    var stat = std.mem.zeroes(std.Io.File.Stat);
+    stat.size = 100;
+    stat.mtime = .{ .nanoseconds = 1_700_000_000_123_456_789 };
+    stat.ctime = .{ .nanoseconds = 1_700_000_001_987_654_321 };
+
+    entry.updateStat(stat);
+
+    try std.testing.expect(!entry.isChanged(stat));
 }

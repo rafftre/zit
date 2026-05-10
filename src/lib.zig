@@ -31,7 +31,7 @@ pub const SetupOptions = @import("lib/repository.zig").SetupOptions;
 
 // Business Logic
 
-pub const file = @import("lib/file.zig");
+pub const index = @import("lib/index.zig");
 pub const object = @import("lib/object.zig");
 
 test {

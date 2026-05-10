@@ -28,6 +28,10 @@ pub const command = Command{
     \\
     \\Pathnames are reported literally. When using -z, they are terminated with
     \\a null byte.
+    \\
+    \\ Because there is no support for standard Git exclusions in this command,
+    \\ the --others option will show all untracked files, including those that
+    \\ would be ignored.
     ,
     .usage_lines =
     \\[-c|--cached] [-o|--others]
@@ -91,7 +95,7 @@ pub const command = Command{
 };
 
 fn handler(ctx: Command.Context, args: Command.Arguments) !void {
-    var opts: zit.file.ListOptions = .{
+    var opts: zit.index.ListOptions = .{
         .cached = args.parsed.get("cached") != null,
         .others = args.parsed.get("others") != null,
         .stage_info = args.parsed.get("stage") != null,
@@ -114,7 +118,7 @@ fn handler(ctx: Command.Context, args: Command.Arguments) !void {
     };
     defer repo.deinit(ctx.allocator);
 
-    var files = try zit.file.list(ctx.io, ctx.allocator, Sha1, repo, &opts);
+    var files = try zit.index.list(ctx.io, ctx.allocator, Sha1, repo, &opts);
     defer {
         for (files.items) |*f| {
             f.deinit(ctx.allocator);

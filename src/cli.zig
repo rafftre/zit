@@ -19,6 +19,7 @@ pub const command_list = [_]Command{
     @import("cli/inflate.zig").command,
     @import("cli/init.zig").command,
     @import("cli/ls-files.zig").command,
+    @import("cli/update-index.zig").command,
     @import("cli/version.zig").command,
 };
 
